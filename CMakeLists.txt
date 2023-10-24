@@ -6,4 +6,5 @@ set(CMAKE_CXX_STANDARD 17)
 add_executable(hft main.cpp
         cubist/Strategy.h
         cubist/Backtester.h
-        cubist/ring_buffer.h)
+        cubist/ring_buffer.h
+        cubist/mytypedefs.h)

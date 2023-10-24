@@ -7,87 +7,79 @@
 
 
 #include <cstddef>
-#include <array>
+#include <vector>
 #include <cassert>
 
-template <typename T, std::size_t Capacity>
+template<typename T, std::size_t Capacity>
 class ring_buffer {
 public:
+
+    ring_buffer() : data(), head{0}, tail{0} {
+        data.reserve(Capacity);
+    }
+
     static_assert(Capacity > 0, "Capacity must be positive.");
 
     [[nodiscard]] bool empty() const noexcept {
-        return head_ == tail_;
+        return head == tail;
     }
 
     [[nodiscard]] bool full() const noexcept {
-        return next(tail_) == head_;
+        return next(tail) == head;
     }
 
     [[nodiscard]] std::size_t size() const noexcept {
-        if (tail_ >= head_) {
-            return tail_ - head_;
+        check();
+        if (tail >= head) {
+            return tail - head;
         } else {
-            return Capacity + tail_ - head_;
+            return Capacity + tail - head;
         }
     }
 
-    void push_back(const T& value) {
+    template<typename... Args>
+    void emplace_back(Args &&... args) {
         assert(!full());
+        check();
 
-        data_[tail_] = value;
-        tail_ = next(tail_);
+        new(&data[tail]) T(std::forward<Args>(args)...);  // placement new
+        tail = next(tail);
     }
 
-    void push_back(T&& value) {
-        assert(!full());
-
-        data_[tail_] = std::move(value);
-        tail_ = next(tail_);
-    }
-
-    template <typename... Args>
-    void emplace_back(Args&&... args) {
-        assert(!full());
-
-        new (&data_[tail_]) T(std::forward<Args>(args)...);  // placement new
-        tail_ = next(tail_);
-    }
-
-    T& front() {
+    T &front() {
         assert(!empty());
+        check();
 
-        return data_[head_];
+        return data[head];
     }
 
-    const T& front() const {
+    const T &front() const {
         assert(!empty());
+        check();
 
-        return data_[head_];
+        return data[head];
     }
 
     void pop() {
         assert(!empty());
+        check();
 
-        head_ = next(head_);
+        head = next(head);
     }
 
 private:
-    std::array<T, Capacity> data_;
-    std::size_t head_ = 0;
-    std::size_t tail_ = 0;
+    std::vector<T> data;
+    std::size_t head;
+    std::size_t tail;
 
     [[nodiscard]] std::size_t next(std::size_t current) const noexcept {
         return (current + 1) % Capacity;
     }
+    void check() {
+        assert(head < Capacity);
+        assert(tail < Capacity);
+    }
 };
-
-// Example usage:
-// ring_buffer<int, 5> buffer;
-// buffer.push_back(42);
-// buffer.emplace_back(43);
-// int front = buffer.front();
-// buffer.pop();
-
 
 
 #endif //HFT_RING_BUFFER_H

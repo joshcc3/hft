@@ -27,6 +27,7 @@ using TimeNs = u64;
 // Message types encapsulated in a union
 struct InboundMsg {
     struct TopLevelUpdate {
+        TopLevelUpdate() = delete;
         PriceL bidPrice;
         Qty bidSize;
         PriceL askPrice;
@@ -34,19 +35,23 @@ struct InboundMsg {
     };
 
     struct OrderModified {
+        OrderModified() = delete;
         OrderId id;
         Qty newQty;
     };
 
     struct OrderAccepted {
+        OrderAccepted() = delete;
         OrderId id;
     };
 
     struct OrderCancelled {
+        OrderCancelled() = delete;
         OrderId id;
     };
 
     struct Trade {
+        Trade() = delete;
         OrderId id;
         PriceL price;
         Qty qty;
@@ -78,14 +83,14 @@ struct OutboundMsg {
 
     struct Cancel {
         OrderId id;
-
+        Cancel() = delete;
         Cancel(OrderId id) : id{id} {}
     };
 
     struct Modify {
         OrderId id;
         Qty size;
-
+        Modify() = delete;
         Modify(OrderId id, Qty size) : id{id}, size{size} {}
     };
 
