@@ -53,7 +53,6 @@ struct InboundMsg {
     };
 
 
-
     std::variant<TopLevelUpdate, OrderModified, OrderAccepted, OrderCancelled, Trade> content;
 };
 
@@ -69,15 +68,25 @@ struct OutboundMsg {
         Side side;
         PriceL orderPrice;
         Qty size;
+
+        Submit(bool isStrategy,
+               OrderId orderId,
+               Side side,
+               PriceL orderPrice,
+               Qty size) : isStrategy{isStrategy}, orderId{orderId}, side{side}, orderPrice{orderPrice}, size{size} {}
     };
 
     struct Cancel {
         OrderId id;
+
+        Cancel(OrderId id) : id{id} {}
     };
 
     struct Modify {
         OrderId id;
         Qty size;
+
+        Modify(OrderId id, Qty size) : id{id}, size{size} {}
     };
 
     std::variant<Submit, Cancel> content;

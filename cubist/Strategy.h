@@ -31,7 +31,7 @@ public:
 
     // State variables
 
-    OrderId nextOrderId;
+    OrderId (*nextOrderId)();
 
     enum class State {
         IDLE,
@@ -50,12 +50,12 @@ public:
     PriceL theoreticalValue;
 
 public:
-    Strategy(double alphaValue, double thresholdValueBps, double maxNotional)
+    Strategy(double alphaValue, double thresholdValueBps, double maxNotional, OrderId (*nextOrderId)())
             : alpha(alphaValue), thresholdBps(thresholdValueBps),
               maxNotional{static_cast<PriceL>(maxNotional * std::pow(10, 9))},
               bestBidPrice(0),
               bestBidSize(-1), bestAskPrice(0), bestAskSize(-1), theoreticalValue(0), inventoryNotional(0),
-              openOrderId{-1}, openOrderSide{Side::NUL}, openOrderQty{-1}, nextOrderId{1} {
+              openOrderId{-1}, openOrderSide{Side::NUL}, openOrderQty{-1}, nextOrderId{nextOrderId} {
 
         assert(alphaValue >= 0 && alphaValue <= 1.0);
         assert(thresholdValueBps >= 0 && thresholdValueBps <= 1000.0);
@@ -97,7 +97,7 @@ public:
         return std::nullopt;
     }
 
-    std::optional<OutboundMsg> orderAccepted(OrderId id) {
+    [[nodiscard]] std::optional<OutboundMsg> orderAccepted(OrderId id) {
         stateChecks();
         assert(state == State::WAITING);
         assert(openOrderId == id);
@@ -139,7 +139,7 @@ public:
         return std::nullopt;
     }
 
-    std::optional<OutboundMsg> submitOrder(Side side, PriceL price, Qty size) {
+    [[nodiscard]] std::optional<OutboundMsg> submitOrder(Side side, PriceL price, Qty size) {
         std::cout << "Order Submitted: " << (side == Side::BUY ? "BUY" : "SELL") << " " << size << " @ "
                   << static_cast<double>(price) * 1e-9 << std::endl;
 
@@ -148,7 +148,7 @@ public:
         assert(side == Side::BUY && price >= bestAskPrice || side == Side::SELL && price <= bestBidPrice);
 
         state = State::WAITING;
-        openOrderId = nextOrderId++;
+        openOrderId = nextOrderId();
         openOrderSide = side;
         openOrderQty = size;
 
@@ -183,7 +183,7 @@ private:
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "cppcoreguidelines-narrowing-conversions"
 
-    std::optional<OutboundMsg> decideTrade() {
+    [[nodiscard]] std::optional<OutboundMsg> decideTrade() {
         assert(maxNotional >= abs(inventoryNotional));
         if (state == State::IDLE) {
             return doTrade();
@@ -193,7 +193,7 @@ private:
         return std::nullopt;
     }
 
-    std::optional<OutboundMsg> doTrade() {// Check for buy signal
+    [[nodiscard]] std::optional<OutboundMsg> doTrade() {// Check for buy signal
         if (theoreticalValue > static_cast<u64>(bestAskPrice * (1.0 + thresholdBps))) {
             u64 targetSize = std::min(uint64_t(bestAskSize), (maxNotional - inventoryNotional) / bestAskPrice);
             if (targetSize > 0) {
