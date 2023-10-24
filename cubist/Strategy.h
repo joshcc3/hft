@@ -63,34 +63,39 @@ public:
     }
 
     // public messages
-    std::optional<OutboundMsg> onTopLevelUpdate(PriceL bidPrice, Qty bidSize, PriceL askPrice, Qty askSize) {
-        assert(bidPrice < askPrice);
-        assert(bidSize > 0 && askSize > 0);
-        assert(bidPrice < 100000000 / bidSize);
-        assert(askPrice < 100000000 / askSize);
-        assert(abs(bestBidPrice - bidPrice) / double(bestBidPrice) < 0.1);
-        assert(abs(bestAskPrice - askPrice) / double(bestAskPrice) < 0.1);
-        assert(bidPrice < bestAskPrice);
-        assert(askPrice > bestBidPrice);
-        // either both dont change or there was a trade
-        assert(((bidPrice == bestBidPrice && bidSize == bestBidSize) !=
-                (askPrice == bestAskPrice && askSize == bestAskSize)) ||
-               (bidPrice < bestBidPrice || askPrice < bestAskPrice));
+    std::optional<OutboundMsg> onTopLevelUpdate(InboundMsg::TopLevelUpdate &update) {
+        if (update.bidPresent() && update.askPresent()) {
+            auto [bidPrice, bidSize, askPrice, askSize] = update;
+            assert(bidPrice < askPrice);
+            assert(bidSize > 0 && askSize > 0);
+            assert(bidPrice < 100000000 / bidSize);
+            assert(askPrice < 100000000 / askSize);
+            assert(abs(bestBidPrice - bidPrice) / double(bestBidPrice) < 0.1);
+            assert(abs(bestAskPrice - askPrice) / double(bestAskPrice) < 0.1);
+            assert(bidPrice < bestAskPrice);
+            assert(askPrice > bestBidPrice);
+            // either both dont change or there was a trade
+            assert(((bidPrice == bestBidPrice && bidSize == bestBidSize) !=
+                    (askPrice == bestAskPrice && askSize == bestAskSize)) ||
+                   (bidPrice < bestBidPrice || askPrice < bestAskPrice));
 
-        stateChecks();
+            stateChecks();
 
-        bestBidPrice = bidPrice;
-        bestBidSize = bidSize;
-        bestAskPrice = askPrice;
-        bestAskSize = askSize;
+            bestBidPrice = bidPrice;
+            bestBidSize = bidSize;
+            bestAskPrice = askPrice;
+            bestAskSize = askSize;
 
-        // Calculate VWAP
-        PriceL vwap = (bestBidPrice * bestAskSize + bestAskPrice * bestBidSize) / (bestBidSize + bestAskSize);
+            // Calculate VWAP
+            PriceL vwap = (bestBidPrice * bestAskSize + bestAskPrice * bestBidSize) / (bestBidSize + bestAskSize);
 
-        // Update the theoretical value using EWMA
-        theoreticalValue = static_cast<PriceL>(alpha * double(vwap) + (1.0 - alpha) * theoreticalValue);
+            // Update the theoretical value using EWMA
+            theoreticalValue = static_cast<PriceL>(alpha * double(vwap) + (1.0 - alpha) * theoreticalValue);
 
-        return decideTrade();
+            return decideTrade();
+        } else {
+            return std::nullopt;
+        }
     }
 
     std::optional<OutboundMsg> orderModified(OrderId id, Qty newQty) {

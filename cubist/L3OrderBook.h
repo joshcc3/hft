@@ -280,7 +280,6 @@ public:
     }
 
     Qty getLevelSize(Side side, int level) {
-        // TODO - optimize this.
         SideLevels &levels = getSideLevels(side);
         auto iter = findLevel(levels, level);
 

@@ -10,9 +10,17 @@ int main() {
     std::function<OrderId()> nextOrderId = [lob]() mutable { return lob.nextOrderId(); };
     Strategy strategy{0.9, 0.005, 100'000, nextOrderId};
 
-    // Mock market data updates (multiplied by 10^9 for fixed-point representation)
-    strategy.onTopLevelUpdate(100'000'000'000, 50, 101'000'000'000, 50);
-    strategy.onTopLevelUpdate(100'500'000'000, 50, 101'500'000'000, 50);
-    strategy.onTopLevelUpdate(101'000'000'000, 50, 102'000'000'000, 50);
+    BacktestCfg cfg{10'000, 10'000};
+
+    Backtester b{cfg, strategy, lob};
+
+    vector<string> mdEvents = {
+
+    };
+
+    for(const auto& e : mdEvents) {
+        b.mdEvent(e);
+    }
+
     return 0;
 }

@@ -33,7 +33,7 @@ public:
     Backtester(BacktestCfg cfg, Strategy &s, L3OrderBook &ob) : cfg{cfg}, strategy(s), lob{ob}, currentTime(0),
                                                                 exchangeToStrat{}, stratToExchange{} {}
 
-    void mdEvent(std::string &line) {
+    void mdEvent(const std::string &line) {
         // 1. Parse the incoming market data event
 
         TimeNs eventNs;
@@ -159,7 +159,7 @@ private:
     // Processing function for each outbound type
 
     [[nodiscard]] std::optional<OutboundMsg> processInbound(const InboundMsg::TopLevelUpdate &update) {
-        return strategy.onTopLevelUpdate(update.bidPrice, update.bidSize, update.askPrice, update.askSize);
+        return strategy.onTopLevelUpdate(update);
     }
 
     [[nodiscard]] std::optional<OutboundMsg> processInbound(const InboundMsg::OrderModified &update) {
