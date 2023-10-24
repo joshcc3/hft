@@ -63,7 +63,7 @@ public:
     }
 
     // public messages
-    std::optional<OutboundMsg> onTopLevelUpdate(InboundMsg::TopLevelUpdate &update) {
+    std::optional<OutboundMsg> onTopLevelUpdate(const InboundMsg::TopLevelUpdate &update) {
         if (update.bidPresent() && update.askPresent()) {
             auto [bidPrice, bidSize, askPrice, askSize] = update;
             assert(bidPrice < askPrice);
