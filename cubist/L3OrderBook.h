@@ -17,10 +17,9 @@
 #include <bitset>
 #include <cmath>
 #include <array>
-
+#include "Strategy.h"
 
 class L3OrderBook {
-
 
 
 };

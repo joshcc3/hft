@@ -6,6 +6,7 @@
 #define HFT_STRATEGY_H
 
 #include "mytypedefs.h"
+#include "L3OrderBook.h"
 
 using u64 = uint64_t;
 
@@ -13,15 +14,14 @@ using u64 = uint64_t;
 #include <cmath>
 #include <cstdint>
 #include <cassert>
+#include <optional>
 
 // TODO - need to request the current time from the simulation
 
 class Strategy {
-private:
+public:
     // Enum for the side of the order
-    enum class Side {
-        BUY, SELL, NUL
-    };
+
 
 
     // Parameters
@@ -62,7 +62,7 @@ public:
     }
 
     // public messages
-    void onTopLevelUpdate(PriceL bidPrice, Qty bidSize, PriceL askPrice, Qty askSize) {
+    std::optional<OutboundMsg> onTopLevelUpdate(PriceL bidPrice, Qty bidSize, PriceL askPrice, Qty askSize) {
         assert(bidPrice < askPrice);
         assert(bidSize > 0 && askSize > 0);
         assert(bidPrice < 100000000 / bidSize);
@@ -89,30 +89,33 @@ public:
         // Update the theoretical value using EWMA
         theoreticalValue = static_cast<PriceL>(alpha * double(vwap) + (1.0 - alpha) * theoreticalValue);
 
-        decideTrade();
+        return decideTrade();
     }
 
-    void orderModified(OrderId id, Qty newQty) {
+    std::optional<OutboundMsg> orderModified(OrderId id, Qty newQty) {
         assert(false);
+        return std::nullopt;
     }
 
-    void orderAccepted(OrderId id) {
+    std::optional<OutboundMsg> orderAccepted(OrderId id) {
         stateChecks();
         assert(state == State::WAITING);
         assert(openOrderId == id);
 
-        submitCancel(id);
+        return submitCancel(id);
     }
 
-    void orderCancelled(OrderId id) {
+    std::optional<OutboundMsg> orderCancelled(OrderId id) {
         stateChecks();
         assert(state == State::WAITING);
         assert(openOrderId == id);
 
         orderComplete();
+
+        return std::nullopt;
     }
 
-    void trade(OrderId id, PriceL price, Qty qty) {
+    std::optional<OutboundMsg> trade(OrderId id, PriceL price, Qty qty) {
         stateChecks();
         assert(price <= 1e6);
         assert(qty <= 1e6);
@@ -132,11 +135,11 @@ public:
         }
 
         stateChecks();
+
+        return std::nullopt;
     }
 
-#pragma clang diagnostic pop
-
-    void submitOrder(Side side, PriceL price, Qty size) {
+    std::optional<OutboundMsg> submitOrder(Side side, PriceL price, Qty size) {
         std::cout << "Order Submitted: " << (side == Side::BUY ? "BUY" : "SELL") << " " << size << " @ "
                   << static_cast<double>(price) * 1e-9 << std::endl;
 
@@ -150,13 +153,16 @@ public:
         openOrderQty = size;
 
         stateChecks();
+
+        return std::make_optional<>(OutboundMsg{OutboundMsg::Submit{true, openOrderId, side, price, size}});
     }
 
-    void submitCancel(OrderId orderId) {
+    [[nodiscard]] std::optional<OutboundMsg> submitCancel(OrderId orderId) const {
         assert(state == State::WAITING);
         assert(openOrderId == orderId);
 
         std::cout << "Order Cancel: " << orderId << std::endl;
+        return std::make_optional<>(OutboundMsg{OutboundMsg::Cancel{orderId}});
     }
 
 private:
@@ -177,27 +183,30 @@ private:
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "cppcoreguidelines-narrowing-conversions"
 
-    void decideTrade() {
+    std::optional<OutboundMsg> decideTrade() {
         assert(maxNotional >= abs(inventoryNotional));
         if (state == State::IDLE) {
-            doTrade();
+            return doTrade();
             assert(state == State::WAITING);
         }
         assert(maxNotional >= abs(inventoryNotional));
+        return std::nullopt;
     }
 
-    void doTrade() {// Check for buy signal
+    std::optional<OutboundMsg> doTrade() {// Check for buy signal
         if (theoreticalValue > static_cast<u64>(bestAskPrice * (1.0 + thresholdBps))) {
             u64 targetSize = std::min(uint64_t(bestAskSize), (maxNotional - inventoryNotional) / bestAskPrice);
             if (targetSize > 0) {
-                submitOrder(Side::BUY, bestAskPrice, targetSize);
+                return submitOrder(Side::BUY, bestAskPrice, targetSize);
             }
         } else if (theoreticalValue < bestBidPrice * (1.0 - thresholdBps)) {
             u64 targetSize = std::min(uint64_t(bestBidSize), (maxNotional + inventoryNotional) / bestBidPrice);
             if (targetSize > 0) {
-                submitOrder(Side::SELL, bestBidPrice, targetSize);
+                return submitOrder(Side::SELL, bestBidPrice, targetSize);
             }
         }
+
+        return std::nullopt;
     }
 
 };

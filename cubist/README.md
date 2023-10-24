@@ -151,3 +151,16 @@ aggressively shedding their inventory when they are holding too much.
 The pnl also consists of a large number of costs, like trading fees, borrow costs, marketdata costs,
 
 Also communication with the exchange usually involves a larger number of messages and states
+
+If the connection falls too far behind the exchange would usually terminate the connection.
+We would need to handle reconnection to exchanges as well.
+
+
+With respect to the marketdata lagging behind the backtester state:
+Implement a Look-Ahead Mechanism: While it's not always realistic for live trading, in backtesting, you can implement a look-ahead mechanism. If a market data update is about to modify or remove an order that the strategy has aggressed against, delay or adjust the strategy's action accordingly. This ensures that the strategy operates on a realistic state of the market.
+
+Fallback Strategy: If you detect that an order in your market data has been modified or removed due to the strategy's actions, and it hasn't been accounted for yet, consider a fallback strategy. For instance, if the strategy's order should've been matched against a bid that's no longer present, you can:
+
+a. Match it against the next best bid (if it's an aggressive order).
+
+b. Cancel the strategy's order and log the event for later analysis.

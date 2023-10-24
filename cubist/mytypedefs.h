@@ -6,6 +6,7 @@
 #define HFT_MYTYPEDEFS_H
 
 #include <cstdint>
+#include <variant>
 
 using u8 = uint8_t;
 using u16 = uint16_t;
@@ -21,6 +22,72 @@ using Qty = i32;
 using OrderId = i64;
 using PriceL = u64;
 using NotionalL = i64;
+using TimeNs = u64;
+
+// Message types encapsulated in a union
+struct InboundMsg {
+    struct TopLevelUpdate {
+        PriceL bidPrice;
+        Qty bidSize;
+        PriceL askPrice;
+        Qty askSize;
+    };
+
+    struct OrderModified {
+        OrderId id;
+        Qty newQty;
+    };
+
+    struct OrderAccepted {
+        OrderId id;
+    };
+
+    struct OrderCancelled {
+        OrderId id;
+    };
+
+    struct Trade {
+        OrderId id;
+        PriceL price;
+        Qty qty;
+    };
+
+
+
+    std::variant<TopLevelUpdate, OrderModified, OrderAccepted, OrderCancelled, Trade> content;
+};
+
+enum class Side {
+    BUY, SELL, NUL
+};
+
+struct OutboundMsg {
+
+    struct Submit {
+        bool isStrategy;
+        OrderId orderId;
+        Side side;
+        PriceL orderPrice;
+        Qty size;
+    };
+
+    struct Cancel {
+        OrderId id;
+    };
+
+    struct Modify {
+        OrderId id;
+        Qty size;
+    };
+
+    std::variant<Submit, Cancel> content;
+};
+
+enum class OrderMsgType {
+    ADD,
+    UPDATE,
+    DELETE
+};
 
 template<typename T>
 T abs(T x) {
