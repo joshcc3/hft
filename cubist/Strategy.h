@@ -15,11 +15,10 @@ using u64 = uint64_t;
 #include <cstdint>
 #include <cassert>
 #include <optional>
-
-// TODO - need to request the current time from the simulation
+#include <functional>
+#include <utility>
 
 class Strategy {
-public:
     // Enum for the side of the order
 
 
@@ -31,7 +30,7 @@ public:
 
     // State variables
 
-    OrderId (*nextOrderId)();
+    std::function<OrderId()> nextOrderId;
 
     enum class State {
         IDLE,
@@ -50,12 +49,14 @@ public:
     PriceL theoreticalValue;
 
 public:
-    Strategy(double alphaValue, double thresholdValueBps, double maxNotional, OrderId (*nextOrderId)())
+    Strategy() = delete;
+
+    Strategy(double alphaValue, double thresholdValueBps, double maxNotional, std::function<OrderId()> nextOrderId)
             : alpha(alphaValue), thresholdBps(thresholdValueBps),
               maxNotional{static_cast<PriceL>(maxNotional * std::pow(10, 9))},
               bestBidPrice(0),
               bestBidSize(-1), bestAskPrice(0), bestAskSize(-1), theoreticalValue(0), inventoryNotional(0),
-              openOrderId{-1}, openOrderSide{Side::NUL}, openOrderQty{-1}, nextOrderId{nextOrderId} {
+              openOrderId{-1}, openOrderSide{Side::NUL}, openOrderQty{-1}, nextOrderId{std::move(nextOrderId)} {
 
         assert(alphaValue >= 0 && alphaValue <= 1.0);
         assert(thresholdValueBps >= 0 && thresholdValueBps <= 1000.0);
@@ -210,17 +211,5 @@ private:
     }
 
 };
-
-int main() {
-    // Example usage:
-    Strategy strategy(0.9, 0.005);  // Using 0.9 as alpha for EWMA and 0.005 for 5 bps thresholdBps
-
-    // Mock market data updates (multiplied by 10^9 for fixed-point representation)
-    strategy.onTopLevelUpdate(100'000'000'000, 50, 101'000'000'000, 50);
-    strategy.onTopLevelUpdate(100'500'000'000, 50, 101'500'000'000, 50);
-    strategy.onTopLevelUpdate(101'000'000'000, 50, 102'000'000'000, 50);
-    return 0;
-}
-
 
 #endif //HFT_STRATEGY_H

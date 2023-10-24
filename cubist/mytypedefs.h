@@ -27,7 +27,6 @@ using TimeNs = u64;
 // Message types encapsulated in a union
 struct InboundMsg {
     struct TopLevelUpdate {
-        TopLevelUpdate() = delete;
         PriceL bidPrice;
         Qty bidSize;
         PriceL askPrice;
