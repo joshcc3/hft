@@ -9,12 +9,13 @@
 #include <cstddef>
 #include <vector>
 #include <cassert>
+#include <memory>
 
 template<typename T, std::size_t Capacity>
 class ring_buffer {
 public:
 
-    ring_buffer() : data(), head{0}, tail{0} {
+    ring_buffer() : head{0}, tail{0} {
         data.reserve(Capacity);
     }
 
@@ -75,7 +76,8 @@ private:
     [[nodiscard]] std::size_t next(std::size_t current) const noexcept {
         return (current + 1) % Capacity;
     }
-    void check() {
+
+    void check() const {
         assert(head < Capacity);
         assert(tail < Capacity);
     }

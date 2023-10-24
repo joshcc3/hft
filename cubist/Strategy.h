@@ -55,7 +55,7 @@ public:
             : alpha(alphaValue), thresholdBps(thresholdValueBps),
               maxNotional{static_cast<PriceL>(maxNotional * std::pow(10, 9))},
               bestBidPrice(0),
-              bestBidSize(-1), bestAskPrice(0), bestAskSize(-1), theoreticalValue(0), inventoryNotional(0),
+              bestBidSize(-1), bestAskPrice(0), bestAskSize(-1), theoreticalValue(-1), inventoryNotional(0),
               openOrderId{-1}, openOrderSide{Side::NUL}, openOrderQty{-1}, nextOrderId{std::move(nextOrderId)} {
 
         assert(alphaValue >= 0 && alphaValue <= 1.0);
@@ -72,11 +72,11 @@ public:
             assert(askPrice < 100000000 / askSize * PRECISION);
             assert(bestBidSize <= 0 || abs(bestBidPrice - bidPrice) / double(bestBidPrice) < 0.1);
             assert(bestAskSize <= 0 || abs(bestAskPrice - askPrice) / double(bestAskPrice) < 0.1);
-            assert(bestBidSize <= 0 || bidPrice < bestAskPrice);
-            assert(bestAskSize <= 0 || askPrice > bestBidPrice);
+            assert(bestAskSize <= 0 || bidPrice < bestAskPrice);
+            assert(bestBidSize <= 0 || askPrice > bestBidPrice);
             // either both dont change or there was a trade
             assert(bestAskSize <= 0 || bestBidSize <= 0 || ((bidPrice == bestBidPrice && bidSize == bestBidSize) !=
-                    (askPrice == bestAskPrice && askSize == bestAskSize)) ||
+                                                            (askPrice == bestAskPrice && askSize == bestAskSize)) ||
                    (bidPrice < bestBidPrice || askPrice < bestAskPrice));
 
             stateChecks();
@@ -90,7 +90,7 @@ public:
             PriceL vwap = (bestBidPrice * bestAskSize + bestAskPrice * bestBidSize) / (bestBidSize + bestAskSize);
 
             // Update the theoretical value using EWMA
-            theoreticalValue = static_cast<PriceL>(alpha * double(vwap) + (1.0 - alpha) * theoreticalValue);
+            theoreticalValue = theoreticalValue > 0 ? static_cast<PriceL>(alpha * double(vwap) + (1.0 - alpha) * theoreticalValue) : vwap;
 
             return decideTrade();
         } else {
@@ -129,25 +129,25 @@ public:
 
     std::optional<OutboundMsg> trade(OrderId id, PriceL price, Qty qty) {
         stateChecks();
-        assert(price <= 1e6);
-        assert(qty <= 1e6);
-        assert(state == State::WAITING);
-        assert(openOrderId == id);
+        assert(price <= 1e6 * PRECISION);
+        assert(qty <= 1e6 * PRECISION);
 
-        if (openOrderSide == Side::BUY) {
-            inventoryNotional += NotionalL(price * qty);
-        } else {
-            inventoryNotional -= NotionalL(price * qty);
+        if (id == openOrderId) {
+            assert(state == State::WAITING);
+            if (openOrderSide == Side::BUY) {
+                inventoryNotional += NotionalL(price * qty);
+            } else {
+                inventoryNotional -= NotionalL(price * qty);
+            }
+
+            openOrderQty -= qty;
+
+            if (openOrderQty == 0) {
+                orderComplete();
+            }
+
+            stateChecks();
         }
-
-        openOrderQty -= qty;
-
-        if (openOrderQty == 0) {
-            orderComplete();
-        }
-
-        stateChecks();
-
         return std::nullopt;
     }
 
@@ -205,13 +205,13 @@ private:
     }
 
     [[nodiscard]] std::optional<OutboundMsg> doTrade() {// Check for buy signal
-        if (theoreticalValue > static_cast<u64>(bestAskPrice * (1.0 + thresholdBps))) {
-            u64 targetSize = std::min(uint64_t(bestAskSize), (maxNotional - inventoryNotional) / bestAskPrice);
+        if (theoreticalValue > static_cast<PriceL>(bestAskPrice * (1.0 + thresholdBps))) {
+            Qty targetSize = std::min(PriceL(bestAskSize), (maxNotional - inventoryNotional) / bestAskPrice);
             if (targetSize > 0) {
                 return submitOrder(Side::BUY, bestAskPrice, targetSize);
             }
         } else if (theoreticalValue < bestBidPrice * (1.0 - thresholdBps)) {
-            u64 targetSize = std::min(uint64_t(bestBidSize), (maxNotional + inventoryNotional) / bestBidPrice);
+            Qty targetSize = std::min(Qty(bestBidSize), Qty((maxNotional + inventoryNotional) / bestBidPrice));
             if (targetSize > 0) {
                 return submitOrder(Side::SELL, bestBidPrice, targetSize);
             }

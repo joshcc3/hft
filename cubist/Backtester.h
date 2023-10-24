@@ -46,9 +46,8 @@ public:
         bool outstandingMsgs = true;
         // 2. Process the messages in the vectors up to the timestamp of the current event
         while (outstandingMsgs) {
-
             TimeNs initialTime = currentTime;
-
+            size_t queueSize = stratToExchange.size() + exchangeToStrat.size();
 
             TimeNs inTime = !exchangeToStrat.empty() ? exchangeToStrat.front().first : MAX_TIME;
             TimeNs outTime = !stratToExchange.empty() ? stratToExchange.front().first : MAX_TIME;
@@ -59,6 +58,7 @@ public:
             assert(!(inMsgFirst && outMsgFirst));
 
             if (inMsgFirst) {
+                outstandingMsgs = true;
                 currentTime = inTime;
                 const std::pair<TimeNs, InboundMsg> &in = exchangeToStrat.front();
                 std::visit([this](auto &&arg) {
@@ -70,6 +70,7 @@ public:
                 }, in.second.content);
                 exchangeToStrat.pop();
             } else if (outMsgFirst) {
+                outstandingMsgs = true;
                 currentTime = outTime;
                 const std::pair<TimeNs, OutboundMsg> &out = stratToExchange.front();
                 std::visit([this](auto &&arg) {
@@ -92,7 +93,7 @@ public:
             assert(outstandingMsgs || (!inNotEmpty && !outNotEmpty) ||
                    (inNotEmpty && exchangeToStrat.front().first > eventNs) ||
                    (outNotEmpty && stratToExchange.front().first > eventNs));
-            assert(!outstandingMsgs || currentTime > initialTime);
+            assert(!outstandingMsgs || queueSize - 1 == stratToExchange.size() + exchangeToStrat.size());
 
         }
 

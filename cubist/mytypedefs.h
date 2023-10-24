@@ -20,7 +20,7 @@ using i64 = int64_t;
 
 using Qty = i32;
 using OrderId = i64;
-using PriceL = u64;
+using PriceL = i64;
 using NotionalL = i64;
 using TimeNs = u64;
 
