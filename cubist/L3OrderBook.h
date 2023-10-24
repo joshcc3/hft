@@ -17,11 +17,24 @@
 #include <bitset>
 #include <cmath>
 #include <array>
-#include "Strategy.h"
+#include <optional>
+#include "mytypedefs.h"
 
 class L3OrderBook {
 
 
+public:
+    bool empty();
+
+    InboundMsg::TopLevelUpdate getBBO();
+
+    TimeNs lastUpdateTs;
+
+    std::optional<InboundMsg::Trade> submit(bool isStrategy, OrderId orderId, Qty size, Side side, PriceL orderPrice);
+
+    void cancel(OrderId id);
+
+    void modify(OrderId orderId, Qty size);
 };
 
 
