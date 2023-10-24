@@ -1,7 +1,20 @@
 cmake_minimum_required(VERSION 3.26)
-project(hft)
-
+project(cubist)
 set(CMAKE_CXX_STANDARD 17)
 
-add_executable(hft main.cpp
-        cubist/Strategy.h)
+
+add_executable(cubist
+        cubist/Strategy.h
+        cubist/Backtester.h
+        cubist/RingBuffer.h
+        cubist/mytypedefs.h
+        cubist/L3OrderBook.h
+        cubist/Backtester.cpp
+        cubist/BacktestListener.cpp
+        cubist/Strategy.cpp
+        cubist/main.cpp
+)
+add_executable(networking networking/epoll_test.cpp
+        networking/simple_server.cpp)
+
+add_executable(debug debug.cpp)
