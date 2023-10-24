@@ -185,10 +185,12 @@ class L3OrderBook {
 
     static constexpr OrderId STRATEGY_ORDER_ID_START = OrderId(1) << 44;
 
+
 public:
+    InboundMsg::TopLevelUpdate cached;
     TimeNs lastUpdateTs;
 
-    L3OrderBook() : lastUpdateTs{0}, bidLevels(), askLevels(), orderIdMap(), nextId{STRATEGY_ORDER_ID_START} {
+    L3OrderBook() : lastUpdateTs{0}, bidLevels(), askLevels(), orderIdMap(), nextId{STRATEGY_ORDER_ID_START}, cached{} {
     }
 
     [[nodiscard]] bool empty() const noexcept {
@@ -199,23 +201,13 @@ public:
         return nextId++;
     }
 
-    InboundMsg::TopLevelUpdate getBBO() {
-
-        PriceL bidPrice = 0;
-        Qty bidSize = -1;
-        PriceL askPrice = -1;
-        Qty askSize = 0;
-        if (!bidLevels.empty()) {
-            bidPrice = getPriceL(*bidLevels.begin());
-            bidSize = getLevelSize(Side::BUY, 0);
-        }
-        if (!askLevels.empty()) {
-            askPrice = getPriceL(*askLevels.begin());
-            askSize = getLevelSize(Side::SELL, 0);
-        }
-
-        return InboundMsg::TopLevelUpdate{bidPrice, bidSize, askPrice, askSize};
+    bool bboUpdated() {
+        const InboundMsg::TopLevelUpdate &curBBO = getBBO();
+        bool updated = !(cached == curBBO);
+        cached = curBBO;
+        return updated;
     }
+
 
     std::vector<InboundMsg::Trade>
     submit(TimeNs t, bool isStrategy, OrderId orderId, Qty size, Side side, // NOLINT(*-no-recursion)
@@ -410,6 +402,24 @@ private:
         auto iter = levels.begin();
         for (int i = 0; iter != levels.end() && i < level; ++i, ++iter);
         return iter;
+    }
+
+    InboundMsg::TopLevelUpdate getBBO() {
+
+        PriceL bidPrice = 0;
+        Qty bidSize = -1;
+        PriceL askPrice = -1;
+        Qty askSize = 0;
+        if (!bidLevels.empty()) {
+            bidPrice = getPriceL(*bidLevels.begin());
+            bidSize = getLevelSize(Side::BUY, 0);
+        }
+        if (!askLevels.empty()) {
+            askPrice = getPriceL(*askLevels.begin());
+            askSize = getLevelSize(Side::SELL, 0);
+        }
+
+        return InboundMsg::TopLevelUpdate{bidPrice, bidSize, askPrice, askSize};
     }
 
 };

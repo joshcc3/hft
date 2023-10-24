@@ -36,10 +36,11 @@ public:
     void mdEvent(const std::string &line) {
         // 1. Parse the incoming market data event
 
-        TimeNs eventNs;
-        char _msgType[7];
-        OrderId id;
-        scanf(line.c_str(), "%d, %s, %d", &eventNs, _msgType, &id);
+        TimeNs eventNs{0};
+        char _msgType[20] = {};
+        OrderId id{0};
+        int matched = sscanf(line.c_str(), "%d,%s%d", &eventNs, _msgType, &id);
+        assert(matched == 3 && id > 0 && eventNs > 0);
 
         // TODO update current time
         bool outstandingMsgs = true;
@@ -55,7 +56,7 @@ public:
             bool inMsgFirst = inTime <= eventNs && inTime < outTime;
             bool outMsgFirst = outTime <= eventNs && outTime < inTime;
 
-            assert(inMsgFirst ^ outMsgFirst);
+            assert(!(inMsgFirst && outMsgFirst));
 
             if (inMsgFirst) {
                 currentTime = inTime;
@@ -83,8 +84,8 @@ public:
                 outstandingMsgs = false;
             }
 
-            bool inNotEmpty = exchangeToStrat.empty();
-            bool outNotEmpty = stratToExchange.empty();
+            bool inNotEmpty = !exchangeToStrat.empty();
+            bool outNotEmpty = !stratToExchange.empty();
 
             assert(currentTime >= initialTime);
             assert(currentTime <= eventNs);
@@ -102,12 +103,13 @@ public:
                 OrderId orderId{0};
                 char _side{'-'};
                 Qty qty{-1};
-                PriceL price{0};
-                scanf(line.c_str(), "%d,%s", &eventNs, _msgType, &orderId, &_side, &qty, &price);
-                assert(orderId > 0 && (_side == 'B' || _side == 'S') && price > 0 && qty > 0);
+                float priceF{0};
+                int matched = sscanf(line.c_str(), "%d,%s%d, %c,%d,%f", &eventNs, _msgType, &orderId, &_side, &qty, &priceF);
+                assert(matched == 6 && orderId > 0 && (_side == 'B' || _side == 'S') && priceF > 0 && qty > 0);
                 Side side = _side == 'B' ? Side::BUY : Side::SELL;
+                PriceL priceL{PriceL(priceF * double(PRECISION))};
                 const std::vector<InboundMsg::Trade> trades = processOutbound(
-                        OutboundMsg::Submit(false, orderId, side, price, qty));
+                        OutboundMsg::Submit(false, orderId, side, priceL, qty));
 
                 for (const auto &t: trades) {
                     exchangeToStrat.emplace_back(currentTime + cfg.exchangeStratLatency, InboundMsg{t});
@@ -121,7 +123,8 @@ public:
             case 'U': {
                 char _side{'-'};
                 Qty qty{-1};
-                scanf(line.c_str(), "%d,%s", &eventNs, _msgType, &id, &_side, &qty);
+                int matched = sscanf(line.c_str(), "%d,%s%d, %c,%d", &eventNs, _msgType, &id, &_side, &qty);
+                assert(matched == 5);
                 processOutbound(OutboundMsg::Modify(id, qty));
                 break;
             }
@@ -132,8 +135,8 @@ public:
 
         }
 
-        if (!lob.empty()) {
-            exchangeToStrat.emplace_back(currentTime + cfg.exchangeStratLatency, InboundMsg{lob.getBBO()});
+        if (lob.bboUpdated()) {
+            exchangeToStrat.emplace_back(currentTime + cfg.exchangeStratLatency, InboundMsg{lob.cached});
         }
 
         assert(lob.lastUpdateTs == currentTime);

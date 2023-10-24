@@ -15,7 +15,12 @@ int main() {
     Backtester b{cfg, strategy, lob};
 
     vector<string> mdEvents = {
-
+            "1, ADD, 1, B, 10, 100",
+            "2, ADD, 2, S, 10, 101",
+            "3, ADD, 3, B, 10, 90",
+            "4, DELETE, 2",
+            "5, ADD, 4, S, 10, 91",
+            "100000000, ADD, 5, S, 10, 100",
     };
 
     for(const auto& e : mdEvents) {

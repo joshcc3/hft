@@ -68,14 +68,14 @@ public:
             auto [bidPrice, bidSize, askPrice, askSize] = update;
             assert(bidPrice < askPrice);
             assert(bidSize > 0 && askSize > 0);
-            assert(bidPrice < 100000000 / bidSize);
-            assert(askPrice < 100000000 / askSize);
-            assert(abs(bestBidPrice - bidPrice) / double(bestBidPrice) < 0.1);
-            assert(abs(bestAskPrice - askPrice) / double(bestAskPrice) < 0.1);
-            assert(bidPrice < bestAskPrice);
-            assert(askPrice > bestBidPrice);
+            assert(bidPrice < 100000000 / bidSize * PRECISION);
+            assert(askPrice < 100000000 / askSize * PRECISION);
+            assert(bestBidSize <= 0 || abs(bestBidPrice - bidPrice) / double(bestBidPrice) < 0.1);
+            assert(bestAskSize <= 0 || abs(bestAskPrice - askPrice) / double(bestAskPrice) < 0.1);
+            assert(bestBidSize <= 0 || bidPrice < bestAskPrice);
+            assert(bestAskSize <= 0 || askPrice > bestBidPrice);
             // either both dont change or there was a trade
-            assert(((bidPrice == bestBidPrice && bidSize == bestBidSize) !=
+            assert(bestAskSize <= 0 || bestBidSize <= 0 || ((bidPrice == bestBidPrice && bidSize == bestBidSize) !=
                     (askPrice == bestAskPrice && askSize == bestAskSize)) ||
                    (bidPrice < bestBidPrice || askPrice < bestAskPrice));
 
@@ -94,6 +94,12 @@ public:
 
             return decideTrade();
         } else {
+            auto [bidPrice, bidSize, askPrice, askSize] = update;
+            bestBidPrice = bidPrice;
+            bestBidSize = bidSize;
+            bestAskPrice = askPrice;
+            bestAskSize = askSize;
+
             return std::nullopt;
         }
     }
@@ -174,9 +180,8 @@ public:
 private:
 
     void stateChecks() {
-        assert((openOrderId == -1) == (state == State::IDLE) == (openOrderSide == Side::NUL) == (openOrderQty == 0));
-        assert(openOrderQty >= 0);
-        assert(bestBidPrice < bestAskPrice);
+        assert((openOrderId == -1) == (state == State::IDLE) == (openOrderSide == Side::NUL) == (openOrderQty == -1));
+        assert(bestBidSize <= 0 || bestAskSize <= 0 || bestBidPrice < bestAskPrice);
         assert(abs(inventoryNotional) < maxNotional);
     }
 

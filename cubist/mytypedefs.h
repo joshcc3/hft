@@ -24,6 +24,7 @@ using PriceL = u64;
 using NotionalL = i64;
 using TimeNs = u64;
 
+
 // Message types encapsulated in a union
 struct InboundMsg {
     struct TopLevelUpdate {
@@ -31,6 +32,7 @@ struct InboundMsg {
         Qty bidSize = -1;
         PriceL askPrice = 0;
         Qty askSize = -1;
+
 
         [[nodiscard]] bool bidPresent() const noexcept {
             return bidSize > 0;
@@ -73,6 +75,10 @@ struct InboundMsg {
 
     std::variant<TopLevelUpdate, OrderModified, OrderAccepted, OrderCancelled, Trade> content;
 };
+
+bool operator==(InboundMsg::TopLevelUpdate a, InboundMsg::TopLevelUpdate b) {
+    return a.askSize == b.askSize && a.bidSize == b.bidSize && a.askPrice == b.askPrice && a.bidPrice == b.bidPrice;
+}
 
 enum class Side {
     BUY, SELL, NUL
