@@ -27,30 +27,44 @@ using TimeNs = u64;
 // Message types encapsulated in a union
 struct InboundMsg {
     struct TopLevelUpdate {
-        PriceL bidPrice;
-        Qty bidSize;
-        PriceL askPrice;
-        Qty askSize;
+        PriceL bidPrice = 0;
+        Qty bidSize = -1;
+        PriceL askPrice = 0;
+        Qty askSize = -1;
+
+        [[nodiscard]] bool bidPresent() const noexcept {
+            return bidSize > 0;
+        }
+
+        [[nodiscard]] bool askPresent() const noexcept {
+            return askSize > 0;
+        }
     };
 
     struct OrderModified {
         OrderModified() = delete;
+
         OrderId id;
         Qty newQty;
     };
 
     struct OrderAccepted {
         OrderAccepted() = delete;
+
         OrderId id;
     };
 
     struct OrderCancelled {
         OrderCancelled() = delete;
+
         OrderId id;
     };
 
     struct Trade {
         Trade() = delete;
+
+        Trade(OrderId id, PriceL priceL, Qty qty) : id{id}, price{priceL}, qty{qty} {}
+
         OrderId id;
         PriceL price;
         Qty qty;
@@ -82,14 +96,18 @@ struct OutboundMsg {
 
     struct Cancel {
         OrderId id;
+
         Cancel() = delete;
+
         Cancel(OrderId id) : id{id} {}
     };
 
     struct Modify {
         OrderId id;
         Qty size;
+
         Modify() = delete;
+
         Modify(OrderId id, Qty size) : id{id}, size{size} {}
     };
 

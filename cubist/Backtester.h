@@ -17,7 +17,7 @@
 #include "L3OrderBook.h"
 
 
-
+// TODO - mark all functions noexcept
 // TODO - how do we deal with the fact that in our backtester there might be modifies or deletes
 // in the marketdata for orders that have been matched and therefore don't exist in the marketdata?
 // Do we simply ignore those updates for order ids that don't exist accepting that inaccuracy?
@@ -72,10 +72,10 @@ public:
                 currentTime = outTime;
                 const std::pair<TimeNs, OutboundMsg> &out = stratToExchange.front();
                 std::visit([this](auto &&arg) {
-                    const std::optional<InboundMsg::Trade> &cmd = processOutbound(arg);
-                    if (cmd.has_value()) {
+                    const std::vector<InboundMsg::Trade> trades = processOutbound(arg);
+                    for (const auto &trade: trades) {
                         TimeNs t = currentTime + cfg.exchangeStratLatency;
-                        exchangeToStrat.emplace_back(t, InboundMsg{cmd.value()});
+                        exchangeToStrat.emplace_back(t, InboundMsg{trade});
                     }
                 }, out.second.content);
                 stratToExchange.pop();
@@ -106,25 +106,23 @@ public:
                 scanf(line.c_str(), "%d,%s", &eventNs, _msgType, &orderId, &_side, &qty, &price);
                 assert(orderId > 0 && (_side == 'B' || _side == 'S') && price > 0 && qty > 0);
                 Side side = _side == 'B' ? Side::BUY : Side::SELL;
-                const std::optional<InboundMsg::Trade> &trades = processOutbound(
+                const std::vector<InboundMsg::Trade> trades = processOutbound(
                         OutboundMsg::Submit(false, orderId, side, price, qty));
 
-                if (trades.has_value()) {
-                    exchangeToStrat.emplace_back(currentTime + cfg.exchangeStratLatency, InboundMsg{trades.value()});
+                for (const auto &t: trades) {
+                    exchangeToStrat.emplace_back(currentTime + cfg.exchangeStratLatency, InboundMsg{t});
                 }
                 break;
             }
             case 'D': {
-                const std::optional<InboundMsg::Trade> &res = processOutbound(OutboundMsg::Cancel(id));
-                assert(res == std::nullopt);
+                processOutbound(OutboundMsg::Cancel(id));
                 break;
             }
             case 'U': {
                 char _side{'-'};
                 Qty qty{-1};
                 scanf(line.c_str(), "%d,%s", &eventNs, _msgType, &id, &_side, &qty);
-                const std::optional<InboundMsg::Trade> &res = processOutbound(OutboundMsg::Modify(id, qty));
-                assert(res == std::nullopt);
+                processOutbound(OutboundMsg::Modify(id, qty));
                 break;
             }
             default: {
@@ -180,18 +178,18 @@ private:
         return strategy.trade(update.id, update.price, update.qty);
     }
 
-    [[nodiscard]] std::optional<InboundMsg::Trade> processOutbound(const OutboundMsg::Submit &submit) {
-        return lob.submit(submit.isStrategy, submit.orderId, submit.size, submit.side, submit.orderPrice);
+    [[nodiscard]] std::vector<InboundMsg::Trade> processOutbound(const OutboundMsg::Submit &submit) {
+        return lob.submit(currentTime, submit.isStrategy, submit.orderId, submit.size, submit.side, submit.orderPrice);
     }
 
-    [[nodiscard]] std::optional<InboundMsg::Trade> processOutbound(const OutboundMsg::Cancel &cancel) {
-        lob.cancel(cancel.id);
-        return std::nullopt;
+    std::vector<InboundMsg::Trade> processOutbound(const OutboundMsg::Cancel &cancel) {
+        lob.cancel(currentTime, cancel.id);
+        return {};
     }
 
-    [[nodiscard]] std::optional<InboundMsg::Trade> processOutbound(const OutboundMsg::Modify &modify) {
-        lob.modify(modify.id, modify.size);
-        return std::nullopt;
+    std::vector<InboundMsg::Trade> processOutbound(const OutboundMsg::Modify &modify) {
+        lob.modify(currentTime, modify.id, modify.size);
+        return {};
     }
 
 };
