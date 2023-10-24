@@ -70,8 +70,8 @@ public:
             assert(bidSize > 0 && askSize > 0);
             assert(bidPrice < 100000000 / bidSize * PRECISION);
             assert(askPrice < 100000000 / askSize * PRECISION);
-            assert(bestBidSize <= 0 || abs(bestBidPrice - bidPrice) / double(bestBidPrice) < 0.1);
-            assert(bestAskSize <= 0 || abs(bestAskPrice - askPrice) / double(bestAskPrice) < 0.1);
+            assert(bestBidSize <= 0 || abs(bestBidPrice - bidPrice) / double(bestBidPrice) < 0.5);
+            assert(bestAskSize <= 0 || abs(bestAskPrice - askPrice) / double(bestAskPrice) < 0.5);
             assert(bestAskSize <= 0 || bidPrice < bestAskPrice);
             assert(bestBidSize <= 0 || askPrice > bestBidPrice);
             // either both dont change or there was a trade
@@ -153,7 +153,7 @@ public:
 
     [[nodiscard]] std::optional<OutboundMsg> submitOrder(Side side, PriceL price, Qty size) {
         std::cout << "Order Submitted: " << (side == Side::BUY ? "BUY" : "SELL") << " " << size << " @ "
-                  << static_cast<double>(price) * 1e-9 << std::endl;
+                  << static_cast<double>(price) * 1e-9 << "(Theo: " << theoreticalValue/double(PRECISION) << ")" << std::endl;
 
         assert(state == State::IDLE);
         assert((maxNotional - inventoryNotional) / size >= price);

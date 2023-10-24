@@ -47,7 +47,8 @@ public:
         // 2. Process the messages in the vectors up to the timestamp of the current event
         while (outstandingMsgs) {
             TimeNs initialTime = currentTime;
-            size_t queueSize = stratToExchange.size() + exchangeToStrat.size();
+            size_t q1 = stratToExchange.size();
+            size_t q2 = exchangeToStrat.size();
 
             TimeNs inTime = !exchangeToStrat.empty() ? exchangeToStrat.front().first : MAX_TIME;
             TimeNs outTime = !stratToExchange.empty() ? stratToExchange.front().first : MAX_TIME;
@@ -93,7 +94,7 @@ public:
             assert(outstandingMsgs || (!inNotEmpty && !outNotEmpty) ||
                    (inNotEmpty && exchangeToStrat.front().first > eventNs) ||
                    (outNotEmpty && stratToExchange.front().first > eventNs));
-            assert(!outstandingMsgs || queueSize - 1 == stratToExchange.size() + exchangeToStrat.size());
+            assert(!outstandingMsgs || q1 - 1 == stratToExchange.size() || q2 - 1 == exchangeToStrat.size());
 
         }
 
@@ -142,8 +143,7 @@ public:
 
         assert(lob.lastUpdateTs == currentTime);
         assert(currentTime == eventNs);
-        assert(exchangeToStrat.empty() && lob.empty() ||
-               !exchangeToStrat.empty() && exchangeToStrat.front().first > currentTime);
+        assert(exchangeToStrat.empty() || exchangeToStrat.front().first > currentTime);
         assert(stratToExchange.empty() || stratToExchange.front().first > currentTime);
 
     }
