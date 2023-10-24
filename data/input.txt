@@ -1,0 +1,52 @@
+n b 1 100 100.00
+p b 0
+s b 0
+c b 0
+n b 2 200 100.00
+p b 0
+s b 0
+c b 0
+p b 1
+s b 1
+c b 1
+r - 1 75
+p b 0
+s b 0
+c b 0
+p b 1
+s b 1
+c b 1
+m - 3 76 99.99 1
+p b 0
+s b 0
+c b 0
+p b 1
+s b 1
+c b 1
+s b 0
+n s 4 100 101.00
+p s 0
+s s 0
+c s 0
+n s 5 200 101.00
+p s 0
+s s 0
+c s 0
+p s 1
+s s 1
+c s 1
+r - 4 75
+p s 0
+s s 0
+c s 0
+p s 1
+s s 1
+c s 1
+m - 6 76 100.99 4
+p s 0
+s s 0
+c s 0
+p s 1
+s s 1
+c s 1
+s s 0
