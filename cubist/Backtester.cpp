@@ -1,7 +1,3 @@
-//
-// Created by jc on 24/10/23.
-//
-
 #include "Backtester.h"
 #include <functional>
 

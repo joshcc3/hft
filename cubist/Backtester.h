@@ -1,7 +1,3 @@
-//
-// Created by jc on 24/10/23.
-//
-
 #ifndef HFT_BACKTESTER_H
 #define HFT_BACKTESTER_H
 
@@ -31,11 +27,13 @@ struct BacktestCfg {
 class Backtester {
     constexpr static TimeNs MAX_TIME = (TimeNs(1) << 63);
 public:
-    Backtester(BacktestCfg cfg, Strategy &s, L3OrderBook<L3Vec> &ob, vector<BacktestListener*> &ls) : cfg{cfg}, strategy(s),
-                                                                                              lob{ob}, currentTime(0),
-                                                                                              exchangeToStrat{},
-                                                                                              stratToExchange{},
-                                                                                              ls{ls} {}
+    Backtester(BacktestCfg cfg, Strategy &s, L3OrderBook<L3Vec> &ob, vector<BacktestListener *> &ls) : cfg{cfg},
+                                                                                                       strategy(s),
+                                                                                                       lob{ob},
+                                                                                                       currentTime(0),
+                                                                                                       exchangeToStrat{},
+                                                                                                       stratToExchange{},
+                                                                                                       ls{ls} {}
 
     void mdEvent(const std::string &line) {
         // 1. Parse the incoming market data event
@@ -116,7 +114,7 @@ public:
                 Side side = _side == 'B' ? Side::BUY : Side::SELL;
                 PriceL priceL{PriceL(priceF * double(PRECISION))};
                 const std::vector<InboundMsg::Trade> trades = processOutbound(
-                        OutboundMsg::Submit(false, orderId, side, priceL, qty));
+                        OutboundMsg::Submit(eventNs, false, orderId, side, priceL, qty));
 
                 for (const auto &t: trades) {
                     exchangeToStrat.emplace_back(currentTime + cfg.exchangeStratLatency, InboundMsg{t});
@@ -124,7 +122,7 @@ public:
                 break;
             }
             case 'D': {
-                processOutbound(OutboundMsg::Cancel(id));
+                processOutbound(OutboundMsg::Cancel(eventNs, id));
                 break;
             }
             case 'U': {
@@ -132,7 +130,7 @@ public:
                 Qty qty{-1};
                 int matched = sscanf(line.c_str(), "%d,%s%d, %c,%d", &eventNs, _msgType, &id, &_side, &qty);
                 assert(matched == 5);
-                processOutbound(OutboundMsg::Modify(id, qty));
+                processOutbound(OutboundMsg::Modify(eventNs, id, qty));
                 break;
             }
             default: {
@@ -158,7 +156,7 @@ private:
     BacktestCfg cfg;
     Strategy &strategy;
     L3OrderBook<L3Vec> &lob;
-    vector<BacktestListener*> ls;
+    vector<BacktestListener *> ls;
 
     constexpr static int RING_BUFFER_CAPACITY = 1 << 12;
 
@@ -175,6 +173,7 @@ private:
         }
         return _processInbound(update);
     }
+
     template<typename T>
     [[nodiscard]] std::vector<InboundMsg::Trade> processOutbound(const T &update) {
         for (auto &l: ls) {
@@ -189,19 +188,19 @@ private:
     }
 
     [[nodiscard]] std::optional<OutboundMsg> _processInbound(const InboundMsg::OrderModified &update) {
-        return strategy.orderModified(update.id, update.newQty);
+        return strategy.orderModified(update.timeNs, update.id, update.newQty);
     }
 
     [[nodiscard]] std::optional<OutboundMsg> _processInbound(const InboundMsg::OrderAccepted &update) {
-        return strategy.orderAccepted(update.id);
+        return strategy.orderAccepted(update.timeNs, update.id);
     }
 
     [[nodiscard]] std::optional<OutboundMsg> _processInbound(const InboundMsg::OrderCancelled &update) {
-        return strategy.orderCancelled(update.id);
+        return strategy.orderCancelled(update.timeNs, update.id);
     }
 
     [[nodiscard]] std::optional<OutboundMsg> _processInbound(const InboundMsg::Trade &update) {
-        return strategy.trade(update.id, update.price, update.qty);
+        return strategy.trade(update.timeNs, update.id, update.price, update.qty);
     }
 
     [[nodiscard]] std::vector<InboundMsg::Trade> _processOutbound(const OutboundMsg::Submit &submit) {

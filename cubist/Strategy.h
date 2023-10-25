@@ -44,6 +44,8 @@ class Strategy {
     Qty bestAskSize;
     PriceL theoreticalValue;
 
+    TimeNs currentTime;
+
 public:
     Strategy() = delete;
 
@@ -61,7 +63,9 @@ public:
     // public messages
     std::optional<OutboundMsg> onTopLevelUpdate(const InboundMsg::TopLevelUpdate &update) {
         if (update.bidPresent() && update.askPresent()) {
-            auto [bidPrice, bidSize, askPrice, askSize] = update;
+            auto [timeNs, bidPrice, bidSize, askPrice, askSize] = update;
+            currentTime = timeNs;
+
             assert(bidPrice < askPrice);
             assert(bidSize > 0 && askSize > 0);
             assert(bidPrice < 100000000 / bidSize * PRECISION);
@@ -88,46 +92,51 @@ public:
             // Update the theoretical value using EWMA
             theoreticalValue = theoreticalValue > 0 ? static_cast<PriceL>(alpha * double(vwap) + (1.0 - alpha) * theoreticalValue) : vwap;
 
+
             return decideTrade();
         } else {
-            auto [bidPrice, bidSize, askPrice, askSize] = update;
+            auto [timeNs, bidPrice, bidSize, askPrice, askSize] = update;
             bestBidPrice = bidPrice;
             bestBidSize = bidSize;
             bestAskPrice = askPrice;
             bestAskSize = askSize;
+            currentTime = timeNs;
 
             return std::nullopt;
         }
     }
 
-    std::optional<OutboundMsg> orderModified(OrderId id, Qty newQty) {
+    std::optional<OutboundMsg> orderModified(TimeNs time, OrderId id, Qty newQty) {
         assert(false);
+        currentTime = time;
         return std::nullopt;
     }
 
-    [[nodiscard]] std::optional<OutboundMsg> orderAccepted(OrderId id) {
+    [[nodiscard]] std::optional<OutboundMsg> orderAccepted(TimeNs time, OrderId id) {
         stateChecks();
         assert(state == State::WAITING);
         assert(openOrderId == id);
 
+        currentTime = time;
         return submitCancel(id);
     }
 
-    std::optional<OutboundMsg> orderCancelled(OrderId id) {
+    std::optional<OutboundMsg> orderCancelled(TimeNs time, OrderId id) {
         stateChecks();
         assert(state == State::WAITING);
         assert(openOrderId == id);
 
+        currentTime = time;
         orderComplete();
-
         return std::nullopt;
     }
 
-    std::optional<OutboundMsg> trade(OrderId id, PriceL price, Qty qty) {
+    std::optional<OutboundMsg> trade(TimeNs time, OrderId id, PriceL price, Qty qty) {
         stateChecks();
         assert(price <= 1e6 * PRECISION);
         assert(qty <= 1e6 * PRECISION);
 
+        currentTime = time;
         if (id == openOrderId) {
             assert(state == State::WAITING);
             if (openOrderSide == Side::BUY) {
@@ -162,7 +171,7 @@ public:
 
         stateChecks();
 
-        return std::make_optional<>(OutboundMsg{OutboundMsg::Submit{true, openOrderId, side, price, size}});
+        return std::make_optional<>(OutboundMsg{OutboundMsg::Submit{currentTime, true, openOrderId, side, price, size}});
     }
 
     [[nodiscard]] std::optional<OutboundMsg> submitCancel(OrderId orderId) const {
@@ -170,7 +179,7 @@ public:
         assert(openOrderId == orderId);
 
         std::cout << "Order Cancel: " << orderId << std::endl;
-        return std::make_optional<>(OutboundMsg{OutboundMsg::Cancel{orderId}});
+        return std::make_optional<>(OutboundMsg{OutboundMsg::Cancel{currentTime, orderId}});
     }
 
 private:

@@ -1,7 +1,3 @@
-//
-// Created by jc on 24/10/23.
-//
-
 #ifndef HFT_MYTYPEDEFS_H
 #define HFT_MYTYPEDEFS_H
 
@@ -29,10 +25,10 @@ using TimeNs = u64;
 inline PriceL PRECISION = 1e9;
 
 
-
 // Message types encapsulated in a union
 struct InboundMsg {
     struct TopLevelUpdate {
+        TimeNs time = 0;
         PriceL bidPrice = 0;
         Qty bidSize = -1;
         PriceL askPrice = 0;
@@ -52,6 +48,7 @@ struct InboundMsg {
     struct OrderModified {
         OrderModified() = delete;
 
+        TimeNs timeNs;
         OrderId id;
         Qty newQty;
     };
@@ -59,20 +56,23 @@ struct InboundMsg {
     struct OrderAccepted {
         OrderAccepted() = delete;
 
+        TimeNs timeNs;
         OrderId id;
     };
 
     struct OrderCancelled {
         OrderCancelled() = delete;
 
+        TimeNs timeNs;
         OrderId id;
     };
 
     struct Trade {
         Trade() = delete;
 
-        Trade(OrderId id, PriceL priceL, Qty qty) : id{id}, price{priceL}, qty{qty} {}
+        Trade(TimeNs timeNs, OrderId id, PriceL priceL, Qty qty) : id{id}, price{priceL}, qty{qty}, timeNs{timeNs} {}
 
+        TimeNs timeNs;
         OrderId id;
         PriceL price;
         Qty qty;
@@ -95,34 +95,37 @@ struct OutboundMsg {
         Side side;
         PriceL orderPrice;
         Qty size;
+        TimeNs timeNs;
 
-        Submit(bool isStrategy,
+        Submit(TimeNs timeNs, bool isStrategy,
                OrderId orderId,
                Side side,
                PriceL orderPrice,
-               Qty size) : isStrategy{isStrategy}, orderId{orderId}, side{side}, orderPrice{orderPrice}, size{size} {}
+               Qty size) : isStrategy{isStrategy}, orderId{orderId}, side{side}, orderPrice{orderPrice},
+                                size{size}, timeNs{timeNs} {}
     };
 
     struct Cancel {
         OrderId id;
+        TimeNs timeNs;
 
         Cancel() = delete;
 
-        Cancel(OrderId id) : id{id} {}
+        Cancel(TimeNs timeNs, OrderId id) : id{id}, timeNs{timeNs} {}
     };
 
     struct Modify {
         OrderId id;
         Qty size;
+        TimeNs timeNs;
 
         Modify() = delete;
 
-        Modify(OrderId id, Qty size) : id{id}, size{size} {}
+        Modify(TimeNs time, OrderId id, Qty size) : id{id}, size{size}, timeNs{time} {}
     };
 
     std::variant<Submit, Cancel> content;
 };
-
 
 
 enum class OrderMsgType {
@@ -131,12 +134,19 @@ enum class OrderMsgType {
     DELETE
 };
 
-bool operator==(InboundMsg::TopLevelUpdate a, InboundMsg::TopLevelUpdate b);
+inline bool operator==(InboundMsg::TopLevelUpdate a, InboundMsg::TopLevelUpdate b) {
+    return a.askSize == b.askSize && a.bidSize == b.bidSize && a.askPrice == b.askPrice && a.bidPrice == b.bidPrice;
+}
 
 template<typename T>
-T abs(T x);
+inline T abs(T x) {
+    return x >= 0 ? x : -x;
+}
 
-double getPriceF(PriceL p);
+inline double getPriceF(PriceL p) {
+    return round(double(p) / (PRECISION / 100)) / 100;
+}
+
 
 
 #endif //HFT_MYTYPEDEFS_H

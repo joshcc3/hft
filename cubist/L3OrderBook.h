@@ -1,6 +1,3 @@
-//
-// Created by jc on 24/10/23.
-//
 #ifndef HFT_L3ORDERBOOK_H
 #define HFT_L3ORDERBOOK_H
 
@@ -145,7 +142,7 @@ struct L3Vec {
         return orders.size();
     }
 
-    Qty match(Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg::Trade> &trades) {
+    Qty match(TimeNs time, Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg::Trade> &trades) {
         assert(stateChecks());
         assert(remainingQty > 0);
         Qty ogQty = remainingQty;
@@ -158,10 +155,10 @@ struct L3Vec {
             if (matchedQty < qtyAtLevel) {
                 removeQty(it, remainingQty);
                 remainingQty = 0;
-                trades.emplace_back(orderId, price, matchedQty);
+                trades.emplace_back(time, orderId, price, matchedQty);
                 break;
             } else {
-                trades.emplace_back(orderId, price, qtyAtLevel);
+                trades.emplace_back(time, orderId, price, qtyAtLevel);
                 toDel.push_back(orderId);
             }
             remainingQty -= it->second.size;
@@ -307,7 +304,7 @@ struct L3Map {
         return orders.size();
     }
 
-    Qty match(Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg::Trade> &trades) {
+    Qty match(TimeNs time, Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg::Trade> &trades) {
         assert(remainingQty > 0);
         Qty ogQty = remainingQty;
         auto it = orders.begin();
@@ -319,10 +316,10 @@ struct L3Map {
             if (matchedQty < qtyAtLevel) {
                 removeQty(it, remainingQty);
                 remainingQty = 0;
-                trades.emplace_back(orderId, price, matchedQty);
+                trades.emplace_back(time, orderId, price, matchedQty);
                 break;
             } else {
-                trades.emplace_back(orderId, price, qtyAtLevel);
+                trades.emplace_back(time, orderId, price, qtyAtLevel);
                 toDel.push_back(orderId);
             }
             remainingQty -= it->second.size;
@@ -564,7 +561,7 @@ private:
         vector<InboundMsg::Trade> trades;
 
         while (remainingQty > 0 && levelIter != oppLevels.end() && isAggPrice(side, priceL, getPriceL(*levelIter))) {
-            remainingQty = levelIter->match(remainingQty, orderIDsToDelete, trades);
+            remainingQty = levelIter->match(t, remainingQty, orderIDsToDelete, trades);
             ++levelIter;
         }
         for (auto orderID: orderIDsToDelete) {
@@ -609,7 +606,7 @@ private:
             askSize = getLevelSize(Side::SELL, 0);
         }
 
-        return InboundMsg::TopLevelUpdate{bidPrice, bidSize, askPrice, askSize};
+        return InboundMsg::TopLevelUpdate{lastUpdateTs, bidPrice, bidSize, askPrice, askSize};
     }
 
     bool stateCheck() {
