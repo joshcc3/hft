@@ -142,7 +142,7 @@ struct L3Vec {
         return orders.size();
     }
 
-    Qty match(TimeNs time, Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg::Trade> &trades) {
+    Qty match(Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg::Trade> &trades) {
         assert(stateChecks());
         assert(remainingQty > 0);
         Qty ogQty = remainingQty;
@@ -155,10 +155,10 @@ struct L3Vec {
             if (matchedQty < qtyAtLevel) {
                 removeQty(it, remainingQty);
                 remainingQty = 0;
-                trades.emplace_back(time, orderId, price, matchedQty);
+                trades.emplace_back(orderId, price, matchedQty);
                 break;
             } else {
-                trades.emplace_back(time, orderId, price, qtyAtLevel);
+                trades.emplace_back(orderId, price, qtyAtLevel);
                 toDel.push_back(orderId);
             }
             remainingQty -= it->second.size;
@@ -304,7 +304,7 @@ struct L3Map {
         return orders.size();
     }
 
-    Qty match(TimeNs time, Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg::Trade> &trades) {
+    Qty match(Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg::Trade> &trades) {
         assert(remainingQty > 0);
         Qty ogQty = remainingQty;
         auto it = orders.begin();
@@ -316,10 +316,10 @@ struct L3Map {
             if (matchedQty < qtyAtLevel) {
                 removeQty(it, remainingQty);
                 remainingQty = 0;
-                trades.emplace_back(time, orderId, price, matchedQty);
+                trades.emplace_back(orderId, price, matchedQty);
                 break;
             } else {
-                trades.emplace_back(time, orderId, price, qtyAtLevel);
+                trades.emplace_back(orderId, price, qtyAtLevel);
                 toDel.push_back(orderId);
             }
             remainingQty -= it->second.size;
@@ -399,7 +399,8 @@ public:
         lastUpdateTs = t;
         SideLevels<L3> &levelsOpp = getOppSideLevels(side);
         if (isAggressiveOrder(priceL, levelsOpp, side)) {
-            const auto &[remainingSize, trades] = match(t, levelsOpp, side, size, priceL);
+            auto [remainingSize, trades] = match(t, levelsOpp, side, size, priceL);
+            trades.emplace_back(InboundMsg::Trade{orderId, priceL, size - remainingSize});
             if (remainingSize > 0) {
                 assert(!isAggressiveOrder(priceL, levelsOpp, side));
                 auto ts = submit(t, isStrategy, orderId, remainingSize, side, priceL);
@@ -561,13 +562,14 @@ private:
         vector<InboundMsg::Trade> trades;
 
         while (remainingQty > 0 && levelIter != oppLevels.end() && isAggPrice(side, priceL, getPriceL(*levelIter))) {
-            remainingQty = levelIter->match(t, remainingQty, orderIDsToDelete, trades);
+            remainingQty = levelIter->match(remainingQty, orderIDsToDelete, trades);
             ++levelIter;
         }
         for (auto orderID: orderIDsToDelete) {
             const Order existingOrder = cancel(t, orderID);
             assert(isAggPrice(side, priceL, existingOrder.priceL));
         }
+
         assert(levelIter == oppLevels.end() || !levelIter->empty() && remainingQty == 0);
         assert(remainingQty == 0 || !isAggressiveOrder(priceL, oppLevels, side));
         return {remainingQty, trades};

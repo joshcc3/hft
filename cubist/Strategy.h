@@ -17,8 +17,6 @@ using u64 = uint64_t;
 class Strategy {
     // Enum for the side of the order
 
-
-
     // Parameters
     const double alpha;
     const double thresholdBps;
@@ -30,7 +28,8 @@ class Strategy {
 
     enum class State {
         IDLE,
-        WAITING
+        WAITING_ACCEPT,
+        WAITING_CANCEL
     } state = State::IDLE;
     OrderId openOrderId;
     Side openOrderSide;
@@ -54,7 +53,7 @@ public:
               maxNotional{static_cast<PriceL>(maxNotional * std::pow(10, 9))},
               bestBidPrice(0),
               bestBidSize(-1), bestAskPrice(0), bestAskSize(-1), theoreticalValue(-1), inventoryNotional(0),
-              openOrderId{-1}, openOrderSide{Side::NUL}, openOrderQty{-1}, nextOrderId{std::move(nextOrderId)} {
+              openOrderId{-1}, openOrderSide{Side::NUL}, openOrderQty{-1}, nextOrderId{nextOrderId} {
 
         assert(alphaValue >= 0 && alphaValue <= 1.0);
         assert(thresholdValueBps >= 0 && thresholdValueBps <= 1000.0);
@@ -116,7 +115,7 @@ public:
 
     [[nodiscard]] std::optional<OutboundMsg> orderAccepted(TimeNs time, OrderId id) {
         stateChecks();
-        assert(state == State::WAITING);
+        assert(state == State::WAITING_ACCEPT);
         assert(openOrderId == id);
 
         currentTime = time;
@@ -125,7 +124,7 @@ public:
 
     std::optional<OutboundMsg> orderCancelled(TimeNs time, OrderId id) {
         stateChecks();
-        assert(state == State::WAITING);
+        assert(state == State::WAITING_CANCEL);
         assert(openOrderId == id);
 
         currentTime = time;
@@ -140,7 +139,7 @@ public:
 
         currentTime = time;
         if (id == openOrderId) {
-            assert(state == State::WAITING);
+            assert(state == State::WAITING_ACCEPT || state == State::WAITING_CANCEL);
             if (openOrderSide == Side::BUY) {
                 inventoryNotional += NotionalL(price * qty);
             } else {
@@ -151,6 +150,8 @@ public:
 
             if (openOrderQty == 0) {
                 orderComplete();
+            } else if(state == State::WAITING_ACCEPT) {
+                submitCancel(id);
             }
 
             stateChecks();
@@ -167,7 +168,7 @@ public:
         assert((maxNotional - inventoryNotional) / size >= price);
         assert(side == Side::BUY && price >= bestAskPrice || side == Side::SELL && price <= bestBidPrice);
 
-        state = State::WAITING;
+        state = State::WAITING_ACCEPT;
         openOrderId = nextOrderId();
         openOrderSide = side;
         openOrderQty = size;
@@ -177,10 +178,11 @@ public:
         return std::make_optional<>(OutboundMsg{OutboundMsg::Submit{true, openOrderId, side, price, size}});
     }
 
-    [[nodiscard]] std::optional<OutboundMsg> submitCancel(OrderId orderId) const {
-        assert(state == State::WAITING);
+    [[nodiscard]] std::optional<OutboundMsg> submitCancel(OrderId orderId) {
+        assert(state == State::WAITING_ACCEPT);
         assert(openOrderId == orderId);
 
+        state = State::WAITING_CANCEL;
         std::cout << "Order Cancel: " << orderId << std::endl;
         return std::make_optional<>(OutboundMsg{OutboundMsg::Cancel{orderId}});
     }
@@ -197,6 +199,7 @@ private:
         state = State::IDLE;
         openOrderId = -1;
         openOrderSide = Side::NUL;
+        openOrderQty = -1;
     }
 
 #pragma clang diagnostic push
@@ -206,7 +209,7 @@ private:
         assert(maxNotional >= abs(inventoryNotional));
         if (state == State::IDLE) {
             return doTrade();
-            assert(state == State::WAITING);
+            assert(state == State::WAITING_ACCEPT);
         }
         assert(maxNotional >= abs(inventoryNotional));
         return std::nullopt;

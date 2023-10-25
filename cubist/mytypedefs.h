@@ -67,7 +67,7 @@ struct InboundMsg {
     struct Trade {
         Trade() = delete;
 
-        Trade(TimeNs timeNs, OrderId id, PriceL priceL, Qty qty) : id{id}, price{priceL}, qty{qty} {}
+        Trade(OrderId id, PriceL priceL, Qty qty) : id{id}, price{priceL}, qty{qty} {}
 
         OrderId id;
         PriceL price;
