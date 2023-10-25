@@ -6,7 +6,7 @@ int main() {
     std::function<OrderId()> nextOrderId = [lob]() mutable { return lob.nextOrderId(); };
     Strategy strategy{0.1, 0.005, 100'000, nextOrderId};
 
-    BacktestCfg cfg{10'000, 10'000};
+    BacktestCfg cfg{1, 20};
 
     Logger l;
     vector<BacktestListener*> ls{&l};
@@ -14,12 +14,15 @@ int main() {
     Backtester b{cfg, strategy, lob, ls};
 
     vector<string> mdEvents = {
-            "1, ADD, 1, B, 10, 100",
-            "2, ADD, 2, S, 10, 101",
-            "3, ADD, 3, B, 10, 80",
-            "4, DELETE, 1",
-            "5, ADD, 4, S, 10, 81",
-            "100000000, ADD, 5, S, 10, 100",
+            "10, ADD, 1, B, 10, 100",
+            "20, ADD, 2, S, 10, 101",
+            "30, ADD, 3, B, 10, 95",
+            "40, ADD, 4, S, 10, 105",
+            "50, DELETE, 1",
+            "60, ADD, 5, S, 10, 96",
+            "70, DELETE, 5",
+            "85, ADD, 6, S, 10, 96",
+            "100000000, ADD, 5, S, 10, 100"
     };
 
     for(const auto& e : mdEvents) {
