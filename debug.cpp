@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <chrono>
 #include <cassert>
+#include <deque>
 
 using namespace std;
 
@@ -43,7 +44,10 @@ int main() {
             long timeNs = 0;
             // using lambda 30ms
             for (int i = 0; i < ITERS; i += SZ) {
-                vector<Dat> v2(v);
+                deque<Dat> v2;
+                for (int i = 0; i < v.size(); ++i) {
+                    v2.emplace_back(v[i]);
+                }
                 chrono::time_point s = chrono::system_clock::now();
                 for (int i = 0; i < v.size(); ++i) {
                     v2.erase(std::find(v2.begin(), v2.end(), Dat{deleteElems[i], 1}));
