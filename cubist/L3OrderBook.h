@@ -344,15 +344,17 @@ private:
 
 };
 
-using SideLevels = list<L3Vec>;
+template<typename T>
+using SideLevels = list<T>;
 
 template<typename L3>
 struct OrderIdLoc {
     Side side;
-    SideLevels::iterator l2;
-    L3::iterator loc;
+    typename SideLevels<L3>::iterator l2;
+    typename L3::iterator loc;
 
-    OrderIdLoc(Side side, SideLevels::iterator l2, typename L3::iterator loc) : side{side}, l2{l2}, loc{loc} {
+    OrderIdLoc(Side side, typename SideLevels<L3>::iterator l2, typename L3::iterator loc) : side{side}, l2{l2},
+                                                                                             loc{loc} {
     }
 
 };
@@ -362,8 +364,8 @@ template<typename L3>
 class L3OrderBook {
 
     map<OrderId, OrderIdLoc<L3>> orderIdMap;
-    SideLevels bidLevels;
-    SideLevels askLevels;
+    SideLevels<L3> bidLevels;
+    SideLevels<L3> askLevels;
     OrderId nextId;
 
     static constexpr OrderId STRATEGY_ORDER_ID_START = OrderId(1) << 44;
@@ -398,7 +400,7 @@ public:
         assert(orderId < STRATEGY_ORDER_ID_START || isStrategy);
         stateCheck();
         lastUpdateTs = t;
-        SideLevels &levelsOpp = getOppSideLevels(side);
+        SideLevels<L3> &levelsOpp = getOppSideLevels(side);
         if (isAggressiveOrder(priceL, levelsOpp, side)) {
             const auto &[remainingSize, trades] = match(t, levelsOpp, side, size, priceL);
             if (remainingSize > 0) {
@@ -449,7 +451,7 @@ public:
 
     double getLevelPrice(Side side, int level) {
 
-        SideLevels &levels = getSideLevels(side);
+        SideLevels<L3> &levels = getSideLevels(side);
         auto iter = findLevel(levels, level);
         if (iter == levels.end()) {
             return std::nan("");
@@ -458,7 +460,7 @@ public:
     }
 
     Qty getLevelSize(Side side, int level) {
-        SideLevels &levels = getSideLevels(side);
+        SideLevels<L3> &levels = getSideLevels(side);
         auto iter = findLevel(levels, level);
 
         if (iter == levels.end()) {
@@ -469,7 +471,7 @@ public:
     }
 
     int getLevelOrderCount(Side side, int level) {
-        SideLevels &levels = getSideLevels(side);
+        SideLevels<L3> &levels = getSideLevels(side);
         auto iter = findLevel(levels, level);
         if (iter == levels.end()) {
             return 0;
@@ -489,7 +491,7 @@ private:
         return round(double(bids.begin()->second.priceL) / double(PRECISION / 100)) / 100; // NOLINT(*-integer-division)
     }
 
-    static bool isAggressiveOrder(PriceL price, SideLevels &levels, Side side) noexcept {
+    static bool isAggressiveOrder(PriceL price, SideLevels<L3> &levels, Side side) noexcept {
         assert(side == Side::BUY || side == Side::SELL);
         int dir = side == Side::BUY ? 1 : -1;
         return !levels.empty() && (getPriceL(*levels.begin()) - price) * dir <= 0;
@@ -502,7 +504,7 @@ private:
 
     void insertLevel(TimeNs timeNs, bool isStrategy, OrderId orderId, Side side, Qty size, PriceL priceL) noexcept {
 
-        SideLevels &levels = getSideLevels(side);
+        SideLevels<L3> &levels = getSideLevels(side);
 
         assert(size >= 0 && priceL >= 0);
 
@@ -522,7 +524,7 @@ private:
                                                 L3{{{orderId, Order{timeNs, isStrategy, orderId, side, size, priceL}}},
                                                    side});
                 auto res = insertPos->find(orderId);
-                orderIdMap.emplace(orderId, OrderIdLoc{side, insertPos, res});
+                orderIdMap.emplace(orderId, OrderIdLoc<L3>{side, insertPos, res});
                 return;
             } else if (priceL == curPrice) {
                 auto res = iter->emplace(orderId, Order{timeNs, isStrategy, orderId, side, size, priceL});
@@ -533,10 +535,11 @@ private:
 
         assert(orderIdMap.find(orderId) == orderIdMap.end());
         assert(iter == levels.end());
-        const SideLevels::iterator &insertPos = levels.emplace(iter, L3{{{orderId,
-                                                                          Order{timeNs, isStrategy, orderId, side, size,
-                                                                                priceL}}},
-                                                                        side});
+        const typename SideLevels<L3>::iterator &insertPos = levels.emplace(iter, L3{{{orderId,
+                                                                                       Order{timeNs, isStrategy,
+                                                                                             orderId, side, size,
+                                                                                             priceL}}},
+                                                                                     side});
         const auto &res = insertPos->find(orderId);
         orderIdMap.emplace(orderId, OrderIdLoc<L3>{side, insertPos, res});
 
@@ -551,7 +554,7 @@ private:
     }
 
     pair<Qty, vector<InboundMsg::Trade>>
-    match(TimeNs t, SideLevels &oppLevels, Side side, Qty size, PriceL priceL) noexcept {
+    match(TimeNs t, SideLevels<L3> &oppLevels, Side side, Qty size, PriceL priceL) noexcept {
         assert(isAggressiveOrder(priceL, oppLevels, side));
         Qty remainingQty = size;
         auto levelIter = oppLevels.begin();
@@ -573,31 +576,17 @@ private:
         return {remainingQty, trades};
     }
 
-    /*
-     *     template <bool IsConst = false>
-    auto getValue() -> std::conditional_t<IsConst, const int&, int&> {
-        if constexpr (IsConst) {
-            std::cout << "const version\n";
-            return value;
-        } else {
-            std::cout << "non-const version\n";
-            return value;
-        }
-    }
-
-     */
-
-    SideLevels &getSideLevels(Side side) noexcept {
+    SideLevels<L3> &getSideLevels(Side side) noexcept {
         assert(side == Side::BUY || side == Side::SELL);
         return side == Side::BUY ? bidLevels : askLevels;
     }
 
-    SideLevels &getOppSideLevels(Side side) noexcept {
+    SideLevels<L3> &getOppSideLevels(Side side) noexcept {
         assert(side == Side::BUY || side == Side::SELL);
         return side == Side::BUY ? askLevels : bidLevels;
     }
 
-    static SideLevels::iterator findLevel(SideLevels &levels, int level) noexcept {
+    static typename SideLevels<L3>::iterator findLevel(SideLevels<L3> &levels, int level) noexcept {
         assert(level >= 0);
         assert(!levels.empty());
         auto iter = levels.begin();
@@ -605,7 +594,7 @@ private:
         return iter;
     }
 
-    InboundMsg::TopLevelUpdate getBBO() {
+    [[nodiscard]] InboundMsg::TopLevelUpdate getBBO() {
 
         PriceL bidPrice = 0;
         Qty bidSize = -1;
@@ -623,12 +612,33 @@ private:
         return InboundMsg::TopLevelUpdate{bidPrice, bidSize, askPrice, askSize};
     }
 
-    void stateCheck() {
-        // check that across the book there is only a single mention of an order
-        // check that the levels are ordered by price
+    bool stateCheck() {
         // check that the bbo is valid
         // lastUpdateTs is always increasing.
         // the set of the orderidmap matches the set of the bidlevels and sidelevels.
+
+        bool check = true;
+        vector<PriceL> prices;
+        prices.reserve(bidLevels.size() + askLevels.size());
+        transform(bidLevels.rbegin(), bidLevels.rend(), prices.begin(),
+                  [](const L3Vec &vec) { return vec.orders[0].second.priceL; });
+        transform(askLevels.begin(), askLevels.end(), prices.begin() + prices.size(),
+                  [](const L3Vec &vec) { return vec.orders[0].second.priceL; });
+        assert(check = std::is_sorted(prices.begin(), prices.end()));
+
+        static TimeNs ts = lastUpdateTs;
+        assert(check &= ts <= lastUpdateTs);
+        ts = lastUpdateTs;
+
+        transform(bidLevels.rbegin(), bidLevels.rend(), prices.begin(),
+                  [](const L3Vec &vec) { return vec.orders[0].second.priceL; });
+        int allBids = accumulate(bidLevels.begin(), bidLevels.end(), 0,
+                                 [](int l, const L3Vec &v) { return l + v.size(); });
+        int allOffers = accumulate(askLevels.begin(), askLevels.end(), 0,
+                                   [](int l, const L3Vec &v) { return l + v.size(); });
+        assert(check &= orderIdMap.size() == allBids + allOffers);
+
+        return check;
     }
 
 };

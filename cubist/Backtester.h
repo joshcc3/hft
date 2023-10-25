@@ -31,7 +31,7 @@ struct BacktestCfg {
 class Backtester {
     constexpr static TimeNs MAX_TIME = (TimeNs(1) << 63);
 public:
-    Backtester(BacktestCfg cfg, Strategy &s, L3OrderBook &ob, vector<BacktestListener> &ls) : cfg{cfg}, strategy(s),
+    Backtester(BacktestCfg cfg, Strategy &s, L3OrderBook<L3Vec> &ob, vector<BacktestListener*> &ls) : cfg{cfg}, strategy(s),
                                                                                               lob{ob}, currentTime(0),
                                                                                               exchangeToStrat{},
                                                                                               stratToExchange{},
@@ -157,8 +157,8 @@ private:
 
     BacktestCfg cfg;
     Strategy &strategy;
-    L3OrderBook &lob;
-    vector<BacktestListener> ls;
+    L3OrderBook<L3Vec> &lob;
+    vector<BacktestListener*> ls;
 
     constexpr static int RING_BUFFER_CAPACITY = 1 << 12;
 
@@ -171,14 +171,14 @@ private:
     template<typename T>
     [[nodiscard]] std::optional<OutboundMsg> processInbound(const T &update) {
         for (auto &l: ls) {
-            l.processInbound(update);
+            l->processInbound(update);
         }
         return _processInbound(update);
     }
     template<typename T>
     [[nodiscard]] std::vector<InboundMsg::Trade> processOutbound(const T &update) {
         for (auto &l: ls) {
-            l.processOutbound(update);
+            l->processOutbound(update);
         }
         return _processOutbound(update);
     }

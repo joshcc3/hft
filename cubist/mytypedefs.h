@@ -26,7 +26,8 @@ using PriceL = i64;
 using NotionalL = i64;
 using TimeNs = u64;
 
-PriceL PRECISION = 1e9;
+inline PriceL PRECISION = 1e9;
+
 
 
 // Message types encapsulated in a union
@@ -81,9 +82,6 @@ struct InboundMsg {
     std::variant<TopLevelUpdate, OrderModified, OrderAccepted, OrderCancelled, Trade> content;
 };
 
-bool operator==(InboundMsg::TopLevelUpdate a, InboundMsg::TopLevelUpdate b) {
-    return a.askSize == b.askSize && a.bidSize == b.bidSize && a.askPrice == b.askPrice && a.bidPrice == b.bidPrice;
-}
 
 enum class Side {
     BUY, SELL, NUL
@@ -133,14 +131,13 @@ enum class OrderMsgType {
     DELETE
 };
 
-template<typename T>
-T abs(T x) {
-    return x >= 0 ? x : -x;
-}
+bool operator==(InboundMsg::TopLevelUpdate a, InboundMsg::TopLevelUpdate b);
 
-double getPriceF(PriceL p) {
-    return round(double(p) / (PRECISION / 100)) / 100;
-}
+template<typename T>
+T abs(T x);
+
+double getPriceF(PriceL p);
 
 
 #endif //HFT_MYTYPEDEFS_H
+

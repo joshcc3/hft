@@ -6,13 +6,16 @@
 #include <functional>
 
 int main() {
-    L3OrderBook lob;
+    L3OrderBook<L3Vec> lob;
     std::function<OrderId()> nextOrderId = [lob]() mutable { return lob.nextOrderId(); };
     Strategy strategy{0.1, 0.005, 100'000, nextOrderId};
 
     BacktestCfg cfg{10'000, 10'000};
 
-    Backtester b{cfg, strategy, lob};
+    Logger l;
+    vector<BacktestListener*> ls{&l};
+
+    Backtester b{cfg, strategy, lob, ls};
 
     vector<string> mdEvents = {
             "1, ADD, 1, B, 10, 100",

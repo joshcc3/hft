@@ -1,6 +1,6 @@
-//
-// Created by jc on 24/10/23.
-//
+
+#ifndef BACKTEST_L_H
+#define BACKTEST_L_H
 
 #include "mytypedefs.h"
 #include <iostream>
@@ -24,25 +24,28 @@ public:
 class BacktestListener {
 public:
 
-    virtual void processInbound(const InboundMsg::TopLevelUpdate &update);
+    virtual void processInbound(const InboundMsg::TopLevelUpdate &update)  = 0;
 
-    virtual void processInbound(const InboundMsg::OrderModified &update);
+    virtual void processInbound(const InboundMsg::OrderModified &update)  = 0;
 
-    virtual void processInbound(const InboundMsg::OrderAccepted &update);
+    virtual void processInbound(const InboundMsg::OrderAccepted &update)  = 0;
 
-    virtual void processInbound(const InboundMsg::OrderCancelled &update);
+    virtual void processInbound(const InboundMsg::OrderCancelled &update)  = 0;
 
-    virtual void processInbound(const InboundMsg::Trade &update);
+    virtual void processInbound(const InboundMsg::Trade &update)  = 0;
 
-    virtual void processOutbound(const OutboundMsg::Submit &submit);
+    virtual void processOutbound(const OutboundMsg::Submit &submit)  = 0;
 
-    virtual void processOutbound(const OutboundMsg::Cancel &cancel);
+    virtual void processOutbound(const OutboundMsg::Cancel &cancel)  = 0;
 
-    virtual void processOutbound(const OutboundMsg::Modify &modify);
+    virtual void processOutbound(const OutboundMsg::Modify &modify)  = 0;
 
 };
 
-class Logger : BacktestListener {
+class Logger : public BacktestListener {
+public:
+
+    Logger() : BacktestListener()  {}
 
     void processInbound(const InboundMsg::TopLevelUpdate &update) override {
         char output[100];
@@ -81,8 +84,9 @@ class Logger : BacktestListener {
 
     void processOutbound(const OutboundMsg::Submit &submit) override {
         char output[100];
-        char *fmt = "<,S,%b,%d,%c,%f,%d\n";
-        sprintf(output, fmt, submit.isStrategy, submit.orderId, submit.side, getPriceF(submit.orderPrice), submit.size);
+        char *fmt = "<,N,%b,%d,%c,%f,%d\n";
+        char s = submit.side == Side::BUY ? 'B' : 'S';
+        sprintf(output, fmt, submit.isStrategy, submit.orderId, s, getPriceF(submit.orderPrice), submit.size);
         std::cout << output;
     }
 
@@ -102,3 +106,5 @@ class Logger : BacktestListener {
 
 
 };
+
+#endif

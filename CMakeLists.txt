@@ -14,7 +14,8 @@ add_executable(cubist
         cubist/mytypedefs.h
         cubist/L3OrderBook.h
         cubist/Backtester.cpp
-        cubist/BacktestListener.cpp)
+        cubist/BacktestListener.cpp
+        cubist/mytypedefs.cpp)
 
 add_executable(debug debug.cpp
         debug.cpp)

@@ -1,7 +1,3 @@
-//
-// Created by jc on 24/10/23.
-//
-
 #ifndef HFT_STRATEGY_H
 #define HFT_STRATEGY_H
 
