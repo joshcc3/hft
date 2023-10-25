@@ -61,9 +61,9 @@ public:
     }
 
     // public messages
-    std::optional<OutboundMsg> onTopLevelUpdate(const InboundMsg::TopLevelUpdate &update) {
+    std::optional<OutboundMsg> onTopLevelUpdate(TimeNs timeNs, const InboundMsg::TopLevelUpdate &update) {
         if (update.bidPresent() && update.askPresent()) {
-            auto [timeNs, bidPrice, bidSize, askPrice, askSize] = update;
+            auto [bidPrice, bidSize, askPrice, askSize] = update;
             currentTime = timeNs;
 
             assert(bidPrice < askPrice);
@@ -90,12 +90,14 @@ public:
             PriceL vwap = (bestBidPrice * bestAskSize + bestAskPrice * bestBidSize) / (bestBidSize + bestAskSize);
 
             // Update the theoretical value using EWMA
-            theoreticalValue = theoreticalValue > 0 ? static_cast<PriceL>(alpha * double(vwap) + (1.0 - alpha) * theoreticalValue) : vwap;
+            theoreticalValue =
+                    theoreticalValue > 0 ? static_cast<PriceL>(alpha * double(vwap) + (1.0 - alpha) * theoreticalValue)
+                                         : vwap;
 
 
             return decideTrade();
         } else {
-            auto [timeNs, bidPrice, bidSize, askPrice, askSize] = update;
+            auto [bidPrice, bidSize, askPrice, askSize] = update;
             bestBidPrice = bidPrice;
             bestBidSize = bidSize;
             bestAskPrice = askPrice;
@@ -158,7 +160,8 @@ public:
 
     [[nodiscard]] std::optional<OutboundMsg> submitOrder(Side side, PriceL price, Qty size) {
         std::cout << "Order Submitted: " << (side == Side::BUY ? "BUY" : "SELL") << " " << size << " @ "
-                  << static_cast<double>(price) * 1e-9 << "(Theo: " << theoreticalValue/double(PRECISION) << ")" << std::endl;
+                  << static_cast<double>(price) * 1e-9 << "(Theo: " << theoreticalValue / double(PRECISION) << ")"
+                  << std::endl;
 
         assert(state == State::IDLE);
         assert((maxNotional - inventoryNotional) / size >= price);
@@ -171,7 +174,7 @@ public:
 
         stateChecks();
 
-        return std::make_optional<>(OutboundMsg{OutboundMsg::Submit{currentTime, true, openOrderId, side, price, size}});
+        return std::make_optional<>(OutboundMsg{OutboundMsg::Submit{true, openOrderId, side, price, size}});
     }
 
     [[nodiscard]] std::optional<OutboundMsg> submitCancel(OrderId orderId) const {
@@ -179,7 +182,7 @@ public:
         assert(openOrderId == orderId);
 
         std::cout << "Order Cancel: " << orderId << std::endl;
-        return std::make_optional<>(OutboundMsg{OutboundMsg::Cancel{currentTime, orderId}});
+        return std::make_optional<>(OutboundMsg{OutboundMsg::Cancel{orderId}});
     }
 
 private:

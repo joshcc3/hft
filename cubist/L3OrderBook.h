@@ -606,7 +606,7 @@ private:
             askSize = getLevelSize(Side::SELL, 0);
         }
 
-        return InboundMsg::TopLevelUpdate{lastUpdateTs, bidPrice, bidSize, askPrice, askSize};
+        return InboundMsg::TopLevelUpdate{bidPrice, bidSize, askPrice, askSize};
     }
 
     bool stateCheck() {

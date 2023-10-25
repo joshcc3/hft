@@ -64,8 +64,9 @@ public:
                 outstandingMsgs = true;
                 currentTime = inTime;
                 const std::pair<TimeNs, InboundMsg> &in = exchangeToStrat.front();
+
                 std::visit([this](auto &&arg) {
-                    const std::optional<OutboundMsg> &cmd = processInbound(arg);
+                    const std::optional<OutboundMsg> &cmd = processInbound(currentTime, arg);
                     if (cmd.has_value()) {
                         TimeNs t = currentTime + cfg.stratExchangeLatency;
                         stratToExchange.emplace_back(t, cmd.value());
@@ -77,7 +78,7 @@ public:
                 currentTime = outTime;
                 const std::pair<TimeNs, OutboundMsg> &out = stratToExchange.front();
                 std::visit([this](auto &&arg) {
-                    const std::vector<InboundMsg::Trade> trades = processOutbound(arg);
+                    const std::vector<InboundMsg::Trade> trades = processOutbound(currentTime, arg);
                     for (const auto &trade: trades) {
                         TimeNs t = currentTime + cfg.exchangeStratLatency;
                         exchangeToStrat.emplace_back(t, InboundMsg{trade});
@@ -113,8 +114,10 @@ public:
                 assert(matched == 6 && orderId > 0 && (_side == 'B' || _side == 'S') && priceF > 0 && qty > 0);
                 Side side = _side == 'B' ? Side::BUY : Side::SELL;
                 PriceL priceL{PriceL(priceF * double(PRECISION))};
-                const std::vector<InboundMsg::Trade> trades = processOutbound(
-                        OutboundMsg::Submit(eventNs, false, orderId, side, priceL, qty));
+                const std::vector<InboundMsg::Trade> trades = processOutbound(eventNs,
+                                                                              OutboundMsg::Submit(false,
+                                                                                                  orderId, side, priceL,
+                                                                                                  qty));
 
                 for (const auto &t: trades) {
                     exchangeToStrat.emplace_back(currentTime + cfg.exchangeStratLatency, InboundMsg{t});
@@ -122,7 +125,7 @@ public:
                 break;
             }
             case 'D': {
-                processOutbound(OutboundMsg::Cancel(eventNs, id));
+                processOutbound(eventNs, OutboundMsg::Cancel(id));
                 break;
             }
             case 'U': {
@@ -130,7 +133,7 @@ public:
                 Qty qty{-1};
                 int matched = sscanf(line.c_str(), "%d,%s%d, %c,%d", &eventNs, _msgType, &id, &_side, &qty);
                 assert(matched == 5);
-                processOutbound(OutboundMsg::Modify(eventNs, id, qty));
+                processOutbound(eventNs, OutboundMsg::Modify(id, qty));
                 break;
             }
             default: {
@@ -167,53 +170,53 @@ private:
     // Processing function for each outbound type
 
     template<typename T>
-    [[nodiscard]] std::optional<OutboundMsg> processInbound(const T &update) {
+    [[nodiscard]] std::optional<OutboundMsg> processInbound(TimeNs timeNs, const T &update) {
         for (auto &l: ls) {
-            l->processInbound(update);
+            l->processInbound(timeNs, update);
         }
-        return _processInbound(update);
+        return _processInbound(timeNs, update);
     }
 
     template<typename T>
-    [[nodiscard]] std::vector<InboundMsg::Trade> processOutbound(const T &update) {
+    [[nodiscard]] std::vector<InboundMsg::Trade> processOutbound(TimeNs timeNs, const T &update) {
         for (auto &l: ls) {
-            l->processOutbound(update);
+            l->processOutbound(timeNs, update);
         }
-        return _processOutbound(update);
+        return _processOutbound(timeNs, update);
     }
 
-    [[nodiscard]] std::optional<OutboundMsg> _processInbound(const InboundMsg::TopLevelUpdate &update) {
+    [[nodiscard]] std::optional<OutboundMsg> _processInbound(TimeNs timeNs, const InboundMsg::TopLevelUpdate &update) {
 
-        return strategy.onTopLevelUpdate(update);
+        return strategy.onTopLevelUpdate(timeNs, update);
     }
 
-    [[nodiscard]] std::optional<OutboundMsg> _processInbound(const InboundMsg::OrderModified &update) {
-        return strategy.orderModified(update.timeNs, update.id, update.newQty);
+    [[nodiscard]] std::optional<OutboundMsg> _processInbound(TimeNs timeNs, const InboundMsg::OrderModified &update) {
+        return strategy.orderModified(timeNs, update.id, update.newQty);
     }
 
-    [[nodiscard]] std::optional<OutboundMsg> _processInbound(const InboundMsg::OrderAccepted &update) {
-        return strategy.orderAccepted(update.timeNs, update.id);
+    [[nodiscard]] std::optional<OutboundMsg> _processInbound(TimeNs timeNs, const InboundMsg::OrderAccepted &update) {
+        return strategy.orderAccepted(timeNs, update.id);
     }
 
-    [[nodiscard]] std::optional<OutboundMsg> _processInbound(const InboundMsg::OrderCancelled &update) {
-        return strategy.orderCancelled(update.timeNs, update.id);
+    [[nodiscard]] std::optional<OutboundMsg> _processInbound(TimeNs timeNs, const InboundMsg::OrderCancelled &update) {
+        return strategy.orderCancelled(timeNs, update.id);
     }
 
-    [[nodiscard]] std::optional<OutboundMsg> _processInbound(const InboundMsg::Trade &update) {
-        return strategy.trade(update.timeNs, update.id, update.price, update.qty);
+    [[nodiscard]] std::optional<OutboundMsg> _processInbound(TimeNs timeNs, const InboundMsg::Trade &update) {
+        return strategy.trade(timeNs, update.id, update.price, update.qty);
     }
 
-    [[nodiscard]] std::vector<InboundMsg::Trade> _processOutbound(const OutboundMsg::Submit &submit) {
-        return lob.submit(currentTime, submit.isStrategy, submit.orderId, submit.size, submit.side, submit.orderPrice);
+    [[nodiscard]] std::vector<InboundMsg::Trade> _processOutbound(TimeNs timeNs, const OutboundMsg::Submit &submit) {
+        return lob.submit(timeNs, submit.isStrategy, submit.orderId, submit.size, submit.side, submit.orderPrice);
     }
 
-    std::vector<InboundMsg::Trade> _processOutbound(const OutboundMsg::Cancel &cancel) {
-        lob.cancel(currentTime, cancel.id);
+    std::vector<InboundMsg::Trade> _processOutbound(TimeNs timeNs, const OutboundMsg::Cancel &cancel) {
+        lob.cancel(timeNs, cancel.id);
         return {};
     }
 
-    std::vector<InboundMsg::Trade> _processOutbound(const OutboundMsg::Modify &modify) {
-        lob.modify(currentTime, modify.id, modify.size);
+    std::vector<InboundMsg::Trade> _processOutbound(TimeNs timeNs, const OutboundMsg::Modify &modify) {
+        lob.modify(timeNs, modify.id, modify.size);
         return {};
     }
 

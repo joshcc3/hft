@@ -27,8 +27,8 @@ inline PriceL PRECISION = 1e9;
 
 // Message types encapsulated in a union
 struct InboundMsg {
+
     struct TopLevelUpdate {
-        TimeNs time = 0;
         PriceL bidPrice = 0;
         Qty bidSize = -1;
         PriceL askPrice = 0;
@@ -48,7 +48,6 @@ struct InboundMsg {
     struct OrderModified {
         OrderModified() = delete;
 
-        TimeNs timeNs;
         OrderId id;
         Qty newQty;
     };
@@ -56,23 +55,20 @@ struct InboundMsg {
     struct OrderAccepted {
         OrderAccepted() = delete;
 
-        TimeNs timeNs;
         OrderId id;
     };
 
     struct OrderCancelled {
         OrderCancelled() = delete;
 
-        TimeNs timeNs;
         OrderId id;
     };
 
     struct Trade {
         Trade() = delete;
 
-        Trade(TimeNs timeNs, OrderId id, PriceL priceL, Qty qty) : id{id}, price{priceL}, qty{qty}, timeNs{timeNs} {}
+        Trade(TimeNs timeNs, OrderId id, PriceL priceL, Qty qty) : id{id}, price{priceL}, qty{qty} {}
 
-        TimeNs timeNs;
         OrderId id;
         PriceL price;
         Qty qty;
@@ -95,33 +91,30 @@ struct OutboundMsg {
         Side side;
         PriceL orderPrice;
         Qty size;
-        TimeNs timeNs;
 
-        Submit(TimeNs timeNs, bool isStrategy,
+        Submit(bool isStrategy,
                OrderId orderId,
                Side side,
                PriceL orderPrice,
                Qty size) : isStrategy{isStrategy}, orderId{orderId}, side{side}, orderPrice{orderPrice},
-                                size{size}, timeNs{timeNs} {}
+                                size{size} {}
     };
 
     struct Cancel {
         OrderId id;
-        TimeNs timeNs;
 
         Cancel() = delete;
 
-        Cancel(TimeNs timeNs, OrderId id) : id{id}, timeNs{timeNs} {}
+        Cancel(OrderId id) : id{id} {}
     };
 
     struct Modify {
         OrderId id;
         Qty size;
-        TimeNs timeNs;
 
         Modify() = delete;
 
-        Modify(TimeNs time, OrderId id, Qty size) : id{id}, size{size}, timeNs{time} {}
+        Modify(OrderId id, Qty size) : id{id}, size{size} {}
     };
 
     std::variant<Submit, Cancel> content;
