@@ -15,22 +15,12 @@
 #include <cmath>
 #include <array>
 
+// TODO - when should you use noexcept
+
 using namespace std;
-
-/*
- * Differences from submitted solution:
- *
- * Fixes bug 2 bugs and adds more checks.
- * Handles aggressive orders and caches levelSize calculation.
- */
-
-/*
-    OrderBook is a level 3 orderbook.  Please fill out the stub below.
-*/
 
 using u64 = uint64_t;
 
-PriceL PRECISION = 1e9;
 
 struct Order {
     bool isStrategy;
@@ -57,15 +47,17 @@ struct Order {
 
 
 struct L3 {
+
+    using OrderMap = map<OrderId, Order>;
+
     const Side side;
-
     Qty levelSize;
-    map<OrderId, Order> orders;
+    OrderMap orders;
 
-    using const_iterator = map<OrderId, Order>::const_iterator;
-    using iterator = map<OrderId, Order>::iterator;
+    using const_iterator = OrderMap::const_iterator;
+    using iterator = OrderMap::iterator;
 
-    explicit L3(map<OrderId, Order> &&mp, Side side) : orders(mp), levelSize{0}, side{side} {
+    explicit L3(OrderMap &&mp, Side side) : orders(mp), levelSize{0}, side{side} {
         assert(side == Side::BUY || side == Side::SELL);
         for (const auto &it: mp) {
             levelSize += it.second.size;
@@ -77,6 +69,7 @@ struct L3 {
         return orders.empty();
     }
 
+    // TODO - use compile time if here
     [[nodiscard]] const_iterator begin() const {
         assert(!orders.empty());
         return orders.begin();
@@ -160,10 +153,17 @@ struct L3 {
         return remainingQty;
     }
 
+private:
+    void stateChecks() {
+        // check that the levelSize matches the sum of the orders
+        // check that all orders within a level have the same price and side and different order ids.
+        // check that the size > 0 for all orders
+        // all keys match the order id of the orders
+        // check that all sizes and prices are positive.
+        // assert that we iterate over the orders in price-time priority
+    }
+
 };
-
-
-//using L3 = map<OrderId, Order>;
 
 using SideLevels = list<L3>;
 
@@ -177,7 +177,9 @@ struct OrderIdLoc {
 
 };
 
+
 class L3OrderBook {
+
     map<OrderId, OrderIdLoc> orderIdMap;
     SideLevels bidLevels;
     SideLevels askLevels;
@@ -213,6 +215,7 @@ public:
     submit(TimeNs t, bool isStrategy, OrderId orderId, Qty size, Side side, // NOLINT(*-no-recursion)
            PriceL priceL) noexcept { // NOLINT(*-no-recursion)
         assert(orderId < STRATEGY_ORDER_ID_START || isStrategy);
+        stateCheck();
         lastUpdateTs = t;
         SideLevels &levelsOpp = getOppSideLevels(side);
         if (isAggressiveOrder(priceL, levelsOpp, side)) {
@@ -230,6 +233,7 @@ public:
     }
 
     void modify(TimeNs t, OrderId oldOrderId, Qty newSize) {
+        stateCheck();
         lastUpdateTs = t;
         const Order existingOrder = cancel(lastUpdateTs, oldOrderId);
         assert(existingOrder.orderId == oldOrderId);
@@ -238,6 +242,7 @@ public:
     }
 
     Order cancel(TimeNs t, OrderId orderId) {
+        stateCheck();
         lastUpdateTs = t;
         const auto &elem = orderIdMap.find(orderId);
         assert(elem != orderIdMap.end());
@@ -336,15 +341,18 @@ private:
                                                 L3{{{orderId, Order{isStrategy, orderId, side, size, priceL}}}, side});
                 auto res = insertPos->find(orderId);
                 orderIdMap.emplace(orderId, OrderIdLoc{side, insertPos, res});
+                return;
             } else if (priceL == curPrice) {
                 auto res = iter->emplace(orderId, Order{isStrategy, orderId, side, size, priceL});
                 if (!res.second) {
                     assert(false);
                 }
                 orderIdMap.emplace(orderId, OrderIdLoc{side, iter, res.first});
+                return;
             }
         }
 
+        assert(orderIdMap.find(orderId) == orderIdMap.end());
         assert(iter == levels.end());
         const SideLevels::iterator &insertPos = levels.emplace(iter, L3{{{orderId,
                                                                           Order{isStrategy, orderId, side, size,
@@ -386,6 +394,20 @@ private:
         return {remainingQty, trades};
     }
 
+    /*
+     *     template <bool IsConst = false>
+    auto getValue() -> std::conditional_t<IsConst, const int&, int&> {
+        if constexpr (IsConst) {
+            std::cout << "const version\n";
+            return value;
+        } else {
+            std::cout << "non-const version\n";
+            return value;
+        }
+    }
+
+     */
+
     SideLevels &getSideLevels(Side side) noexcept {
         assert(side == Side::BUY || side == Side::SELL);
         return side == Side::BUY ? bidLevels : askLevels;
@@ -420,6 +442,14 @@ private:
         }
 
         return InboundMsg::TopLevelUpdate{bidPrice, bidSize, askPrice, askSize};
+    }
+
+    void stateCheck() {
+        // check that across the book there is only a single mention of an order
+        // check that the levels are ordered by price
+        // check that the bbo is valid
+        // lastUpdateTs is always increasing.
+        // the set of the orderidmap matches the set of the bidlevels and sidelevels.
     }
 
 };

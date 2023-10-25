@@ -7,6 +7,8 @@
 
 #include <cstdint>
 #include <variant>
+#include <cmath>
+
 
 using u8 = uint8_t;
 using u16 = uint16_t;
@@ -23,6 +25,8 @@ using OrderId = i64;
 using PriceL = i64;
 using NotionalL = i64;
 using TimeNs = u64;
+
+PriceL PRECISION = 1e9;
 
 
 // Message types encapsulated in a union
@@ -41,6 +45,7 @@ struct InboundMsg {
         [[nodiscard]] bool askPresent() const noexcept {
             return askSize > 0;
         }
+
     };
 
     struct OrderModified {
@@ -120,6 +125,8 @@ struct OutboundMsg {
     std::variant<Submit, Cancel> content;
 };
 
+
+
 enum class OrderMsgType {
     ADD,
     UPDATE,
@@ -129,6 +136,10 @@ enum class OrderMsgType {
 template<typename T>
 T abs(T x) {
     return x >= 0 ? x : -x;
+}
+
+double getPriceF(PriceL p) {
+    return round(double(p) / (PRECISION / 100)) / 100;
 }
 
 

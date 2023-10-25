@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.26)
 project(millen)
 project(cubist)
+project(debug)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -12,4 +13,8 @@ add_executable(cubist
         cubist/ring_buffer.h
         cubist/mytypedefs.h
         cubist/L3OrderBook.h
-        cubist/Backtester.cpp)
+        cubist/Backtester.cpp
+        cubist/BacktestListener.cpp)
+
+add_executable(debug debug.cpp
+        debug.cpp)

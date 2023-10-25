@@ -11,6 +11,8 @@
 #include <cassert>
 #include <memory>
 
+// TODO use a unique_ptr for an array here instead of a vector.
+
 template<typename T, std::size_t Capacity>
 class ring_buffer {
 public:
