@@ -15,19 +15,13 @@
 #include <numeric>
 #include <unordered_set>
 
-// TODO - when should you use noexcept
-
-using namespace std;
-
-using u64 = uint64_t;
-
 
 struct Order {
-    bool isStrategy;
-    OrderId orderId;
-    Side side;
     PriceL priceL;
     Qty size;
+    OrderId orderId;
+    bool isStrategy;
+    Side side;
     TimeNs timeNs;
 
 
@@ -45,16 +39,16 @@ struct Order {
 
 };
 
-struct L3Vec {
+class L3Vec {
 
-    using OrderMap = vector<pair<OrderId, Order>>;
-
-    const Side side;
-    Qty levelSize;
-    OrderMap orders;
-
+public:
+    using OrderMap = std::vector<std::pair<OrderId, Order>>;
     using const_iterator = OrderMap::const_iterator;
     using iterator = OrderMap::iterator;
+
+    OrderMap orders;
+    Qty levelSize;
+    const Side side;
 
     explicit L3Vec(OrderMap &&mp, Side side) : orders(mp), levelSize{0}, side{side} {
         assert(side == Side::BUY || side == Side::SELL);
@@ -139,7 +133,7 @@ struct L3Vec {
         return orders.size();
     }
 
-    Qty match(Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg> &trades) {
+    Qty match(Qty remainingQty, std::vector<OrderId> &toDel, std::vector<InboundMsg> &trades) {
         assert(stateChecks());
         assert(remainingQty > 0);
         Qty ogQty = remainingQty;
@@ -148,7 +142,7 @@ struct L3Vec {
             Qty qtyAtLevel = it->second.size;
             OrderId orderId = it->second.orderId;
             PriceL price = it->second.priceL;
-            Qty matchedQty = min(qtyAtLevel, remainingQty);
+            Qty matchedQty = std::min(qtyAtLevel, remainingQty);
             if (matchedQty < qtyAtLevel) {
                 removeQty(it, remainingQty);
                 remainingQty = 0;
@@ -167,6 +161,7 @@ struct L3Vec {
     }
 
 private:
+
     bool stateChecks() {
         // check that the levelSize matches the sum of the orders
         // check that all orders within a level have the same price and side and different order ids.
@@ -204,7 +199,7 @@ private:
                                                             });
         assert(check &= orderValid);
 
-        vector<TimeNs> times;
+        std::vector<TimeNs> times;
         transform(orders.begin(), orders.end(), std::inserter(times, times.end()),
                   [](const auto &p) { return p.second.timeNs; });
 
@@ -217,7 +212,7 @@ private:
 };
 
 template<typename T>
-using SideLevels = list<T>;
+using SideLevels = std::list<T>;
 
 template<typename L3>
 struct OrderIdLoc {
@@ -235,7 +230,7 @@ struct OrderIdLoc {
 template<typename L3>
 class L3OrderBook {
 
-    map<OrderId, OrderIdLoc<L3>> orderIdMap;
+    std::map<OrderId, OrderIdLoc<L3>> orderIdMap;
     SideLevels<L3> bidLevels;
     SideLevels<L3> askLevels;
     OrderId nextId;
@@ -281,7 +276,7 @@ public:
                 assert(!isAggressiveOrder(priceL, levelsOpp, side));
                 auto ts = submit(t, isStrategy, orderId, remainingSize, side, priceL);
                 assert(ts.size() == 1);
-                trades.push_back(move(ts[0]));
+                trades.push_back(std::move(ts[0]));
             }
             return trades;
         } else {
@@ -303,10 +298,10 @@ public:
             assert(existingOrder.size != newSize);
             if (existingOrder.size < newSize) {
                 cancel(t, oldOrderId);
-                const vector<InboundMsg> &output = submit(lastUpdateTs, existingOrder.isStrategy, oldOrderId, newSize,
-                                                    existingOrder.side, existingOrder.priceL);
+                const std::vector<InboundMsg> &output = submit(lastUpdateTs, existingOrder.isStrategy, oldOrderId, newSize,
+                                                          existingOrder.side, existingOrder.priceL);
 
-                assert(output.size() == 1 && holds_alternative<InboundMsg::OrderAccepted>(output[0].content));
+                assert(output.size() == 1 && std::holds_alternative<InboundMsg::OrderAccepted>(output[0].content));
             } else {
                 existingOrder.size = newSize;
             }
@@ -340,20 +335,6 @@ public:
     }
 
 
-    Qty getNumLevels(Side side) {
-        return Qty(getSideLevels(side).size());
-    }
-
-    double getLevelPrice(Side side, int level) {
-
-        SideLevels<L3> &levels = getSideLevels(side);
-        auto iter = findLevel(levels, level);
-        if (iter == levels.end()) {
-            return std::nan("");
-        }
-        return getPriceD(*iter);
-    }
-
     Qty getLevelSize(Side side, int level) {
         SideLevels<L3> &levels = getSideLevels(side);
         auto iter = findLevel(levels, level);
@@ -365,16 +346,6 @@ public:
         return l3.levelSize;
     }
 
-    int getLevelOrderCount(Side side, int level) {
-        SideLevels<L3> &levels = getSideLevels(side);
-        auto iter = findLevel(levels, level);
-        if (iter == levels.end()) {
-            return 0;
-        }
-        return int(iter->size());
-    }
-
-
     static bool isStrategyOrder(OrderId id) {
         return id >= STRATEGY_ORDER_ID_START;
     }
@@ -383,11 +354,6 @@ private:
     static PriceL getPriceL(const L3 &bids) noexcept {
         assert(!bids.empty());
         return bids.begin()->second.priceL;
-    }
-
-    static double getPriceD(const L3 &bids) noexcept {
-        assert(!bids.empty());
-        return round(double(bids.begin()->second.priceL) / double(PRECISION / 100)) / 100; // NOLINT(*-integer-division)
     }
 
     static bool isAggressiveOrder(PriceL price, SideLevels<L3> &levels, Side side) noexcept {
@@ -452,15 +418,15 @@ private:
         }
     }
 
-    pair<Qty, vector<InboundMsg>>
+    std::pair<Qty, std::vector<InboundMsg>>
     match(TimeNs t, SideLevels<L3> &oppLevels, Side side, Qty size, PriceL priceL) noexcept {
         assert(isAggressiveOrder(priceL, oppLevels, side));
         Qty remainingQty = size;
         auto levelIter = oppLevels.begin();
-        vector<OrderId> orderIDsToDelete;
+        std::vector<OrderId> orderIDsToDelete;
         orderIDsToDelete.reserve(8);
 
-        vector<InboundMsg> trades;
+        std::vector<InboundMsg> trades;
 
         while (remainingQty > 0 && levelIter != oppLevels.end() && isAggPrice(side, priceL, getPriceL(*levelIter))) {
             remainingQty = levelIter->match(remainingQty, orderIDsToDelete, trades);
@@ -519,7 +485,7 @@ private:
         // the set of the orderidmap matches the set of the bidlevels and sidelevels.
 
         bool check = true;
-        vector<PriceL> prices;
+        std::vector<PriceL> prices;
         prices.reserve(bidLevels.size() + askLevels.size());
         transform(bidLevels.rbegin(), bidLevels.rend(), prices.begin(),
                   [](const L3Vec &vec) { return vec.orders[0].second.priceL; });

@@ -10,12 +10,13 @@ add_executable(millen main.cpp)
 add_executable(cubist
         cubist/Strategy.h
         cubist/Backtester.h
-        cubist/ring_buffer.h
+        cubist/RingBuffer.h
         cubist/mytypedefs.h
         cubist/L3OrderBook.h
         cubist/Backtester.cpp
         cubist/BacktestListener.cpp
-        cubist/mytypedefs.cpp)
+        cubist/Strategy.cpp
+)
 
 add_executable(debug debug.cpp
         debug.cpp)

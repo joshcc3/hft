@@ -1,20 +1,27 @@
 #ifndef HFT_RING_BUFFER_H
 #define HFT_RING_BUFFER_H
 
-
 #include <cstddef>
 #include <vector>
 #include <cassert>
 #include <memory>
 
-// TODO use a unique_ptr for an array here instead of a vector.
+
+template <typename T>
+struct Free {
+    void operator()(T* ptr) {
+        std::free(ptr);
+    }
+};
 
 template<typename T, std::size_t Capacity>
-class ring_buffer {
+class RingBuffer {
 public:
 
-    ring_buffer() : head{0}, tail{0} {
-        data.reserve(Capacity);
+    RingBuffer() : data{static_cast<T*>(malloc(sizeof(T) * Capacity))}, head{0}, tail{0} {
+        if(data == NULL) {
+            throw std::bad_alloc();
+        }
     }
 
     static_assert(Capacity > 0, "Capacity must be positive.");
@@ -41,7 +48,7 @@ public:
         assert(!full());
         check();
 
-        new(&data[tail]) T(std::forward<Args>(args)...);  // placement new
+        new(&data[tail]) T(std::forward<Args>(args)...);
         tail = next(tail);
     }
 
@@ -67,7 +74,7 @@ public:
     }
 
 private:
-    std::vector<T> data;
+    std::unique_ptr<T[], Free<T>> data;
     std::size_t head;
     std::size_t tail;
 
