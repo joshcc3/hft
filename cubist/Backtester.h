@@ -92,6 +92,13 @@ public:
                 outstandingMsgs = false;
             }
 
+            assert(!outstandingMsgs || q1 - 1 == stratToExchange.size() || q2 - exchangeToStrat.size() <= 1);
+
+            if (lob.bboUpdated()) {
+                outstandingMsgs = true;
+                exchangeToStrat.emplace_back(currentTime + cfg.exchangeStratLatency, InboundMsg{lob.cached});
+            }
+
             bool inNotEmpty = !exchangeToStrat.empty();
             bool outNotEmpty = !stratToExchange.empty();
 
@@ -100,7 +107,6 @@ public:
             assert(outstandingMsgs || (!inNotEmpty && !outNotEmpty) ||
                    (inNotEmpty && exchangeToStrat.front().first > eventNs) ||
                    (outNotEmpty && stratToExchange.front().first > eventNs));
-            assert(!outstandingMsgs || q1 - 1 == stratToExchange.size() || q2 - 1 == exchangeToStrat.size());
 
         }
 

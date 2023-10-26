@@ -270,6 +270,7 @@ public:
     submit(TimeNs t, bool isStrategy, OrderId orderId, Qty size, Side side, // NOLINT(*-no-recursion)
            PriceL priceL) noexcept { // NOLINT(*-no-recursion)
         assert(orderId < STRATEGY_ORDER_ID_START || isStrategy);
+        assert(orderIdMap.find(orderId) == orderIdMap.end());
         assert(stateCheck());
         lastUpdateTs = t;
         SideLevels<L3> &levelsOpp = getOppSideLevels(side);
