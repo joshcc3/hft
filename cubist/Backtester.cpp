@@ -1,33 +1,47 @@
 #include "Backtester.h"
 #include <functional>
+#include <iostream>
+#include <fstream>
+#include <string>
 
-int main() {
+int main(int argc, char *argv[]) {
+    if(argc != 4) {
+        cerr << "Usage: [./backtester [exchange-strat-latency] [strategy-exchange-latency] [input-file]]" << endl;
+        exit(1);
+    }
+
+    TimeNs exchangeStratLatency = atoi(argv[1]);
+    TimeNs stratExchangeLatency = atoi(argv[2]);
+    string inputFile = string(argv[3]);
+
+    if(exchangeStratLatency <= 0 || stratExchangeLatency <= 0) {
+        cerr << "Latencies must be > 0." << endl;
+    }
+
+    std::ifstream ifile(inputFile);
+    if (!ifile) {
+        std::cerr << "Failed to open the file." << std::endl;
+        return 1;
+    }
+
+    BacktestCfg cfg{exchangeStratLatency, stratExchangeLatency};
+
     L3OrderBook<L3Vec> lob;
     std::function<OrderId()> nextOrderId = [lob]() mutable { return lob.nextOrderId(); };
     Strategy strategy{0.1, 0.005, 100'000, nextOrderId};
-
-    BacktestCfg cfg{1, 20};
 
     Logger l;
     vector<BacktestListener*> ls{&l};
 
     Backtester b{cfg, strategy, lob, ls};
 
-    vector<string> mdEvents = {
-            "10, ADD, 1, B, 10, 100",
-            "20, ADD, 2, S, 10, 101",
-            "30, ADD, 3, B, 10, 95",
-            "40, ADD, 4, S, 10, 105",
-            "50, DELETE, 1",
-            "60, ADD, 5, S, 10, 96",
-            "70, DELETE, 5",
-            "85, ADD, 6, S, 10, 96",
-            "100000000, ADD, 5, S, 10, 100"
-    };
-
-    for(const auto& e : mdEvents) {
-        b.mdEvent(e);
+    std::string line;
+    while (std::getline(ifile, line)) {
+        b.mdEvent(line);
     }
 
+    cout << endl;
+
     return 0;
+
 }

@@ -318,10 +318,9 @@ public:
 
     std::vector<InboundMsg> cancel(TimeNs t, OrderId orderId) {
         stateCheck();
+        lastUpdateTs = t;
         const auto &elem = orderIdMap.find(orderId);
-        assert(elem != orderIdMap.end() || orderId < STRATEGY_ORDER_ID_START);
         if (elem != orderIdMap.end()) {
-            lastUpdateTs = t;
             assert(elem != orderIdMap.end());
             const auto &[id, loc] = *elem;
 
@@ -457,7 +456,7 @@ private:
         assert(isAggressiveOrder(priceL, oppLevels, side));
         Qty remainingQty = size;
         auto levelIter = oppLevels.begin();
-        static vector<OrderId> orderIDsToDelete;
+        vector<OrderId> orderIDsToDelete;
         orderIDsToDelete.reserve(8);
 
         vector<InboundMsg> trades;
@@ -467,8 +466,9 @@ private:
             ++levelIter;
         }
         for (auto orderID: orderIDsToDelete) {
+            PriceL ogPrice = orderIdMap.find(orderID)->second.loc->second.priceL;
             cancel(t, orderID);
-            assert(isAggPrice(side, priceL, orderIdMap.find(orderID)->second.loc->second.priceL));
+            assert(isAggPrice(side, priceL, ogPrice));
         }
 
         assert(levelIter == oppLevels.end() || !levelIter->empty() && remainingQty == 0);

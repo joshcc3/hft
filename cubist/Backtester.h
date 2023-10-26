@@ -58,7 +58,7 @@ public:
             TimeNs inTime = !exchangeToStrat.empty() ? exchangeToStrat.front().first : MAX_TIME;
             TimeNs outTime = !stratToExchange.empty() ? stratToExchange.front().first : MAX_TIME;
 
-            bool inMsgFirst = inTime <= eventNs && inTime < outTime;
+            bool inMsgFirst = inTime <= eventNs && inTime <= outTime;
             bool outMsgFirst = outTime <= eventNs && outTime < inTime;
 
             assert(!(inMsgFirst && outMsgFirst));
