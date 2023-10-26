@@ -34,7 +34,7 @@ public:
 
     void processInbound(TimeNs timeNs, const InboundMsg::TopLevelUpdate &update) override {
         char output[100];
-        char *fmt = ">,%lld,TOB,%d,%f,%f,%d\n";
+        const char *fmt = ">,%lld,TOB,%d,%f,%f,%d\n";
         sprintf(output, fmt, timeNs, update.bidSize, getPriceF(update.bidPrice), getPriceF(update.askPrice),
                 update.askSize);
         std::cout << output;
@@ -42,35 +42,35 @@ public:
 
     void processInbound(TimeNs timeNs, const InboundMsg::OrderModified &update) override {
         char output[100];
-        char *fmt = ">,%lld,M,%d,%d\n";
+        const char *fmt = ">,%lld,M,%d,%d\n";
         sprintf(output, fmt, timeNs, update.id, update.newQty);
         std::cout << output;
     }
 
     void processInbound(TimeNs timeNs, const InboundMsg::OrderAccepted &update) override {
         char output[100];
-        char *fmt = ">,%lld,A,%d\n";
+        const char *fmt = ">,%lld,A,%d\n";
         sprintf(output, fmt, timeNs, update.id);
         std::cout << output;
     }
 
     void processInbound(TimeNs timeNs, const InboundMsg::OrderCancelled &update) override {
         char output[100];
-        char *fmt = ">,%lld,C,%d\n";
+        const char *fmt = ">,%lld,C,%d\n";
         sprintf(output, fmt, timeNs, update.id);
         std::cout << output;
     }
 
     void processInbound(TimeNs timeNs, const InboundMsg::Trade &update) override {
         char output[100];
-        char *fmt = ">,%lld,T,%lld,%f,%d\n";
+        const char *fmt = ">,%lld,T,%lld,%f,%d\n";
         sprintf(output, fmt, timeNs, update.id, getPriceF(update.price), update.qty);
         std::cout << output;
     }
 
     void processOutbound(TimeNs timeNs, const OutboundMsg::Submit &submit) override {
         char output[100];
-        char *fmt = "<,%lld,N,%b,%lld,%c,%f,%d\n";
+        const char *fmt = "<,%lld,N,%b,%lld,%c,%f,%d\n";
         char s = submit.side == Side::BUY ? 'B' : 'S';
         sprintf(output, fmt, timeNs, submit.isStrategy, submit.orderId, s, getPriceF(submit.orderPrice),
                 submit.size);
@@ -79,14 +79,14 @@ public:
 
     void processOutbound(TimeNs timeNs, const OutboundMsg::Cancel &cancel) override {
         char output[100];
-        char *fmt = "<,%lld,C,%d\n";
+        const char *fmt = "<,%lld,C,%d\n";
         sprintf(output, fmt, timeNs, cancel.id);
         std::cout << output;
     }
 
     void processOutbound(TimeNs timeNs, const OutboundMsg::Modify &modify) override {
         char output[100];
-        char *fmt = "<,%lld,C,%lld,%d\n";
+        const char *fmt = "<,%lld,C,%lld,%d\n";
         sprintf(output, fmt, timeNs, modify.id, modify.size);
         std::cout << output;
     }

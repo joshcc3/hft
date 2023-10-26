@@ -64,6 +64,7 @@ struct InboundMsg {
         OrderId id;
     };
 
+
     struct Trade {
         Trade() = delete;
 

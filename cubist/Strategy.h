@@ -108,27 +108,31 @@ public:
     }
 
     std::optional<OutboundMsg> orderModified(TimeNs time, OrderId id, Qty newQty) {
-        assert(false);
         currentTime = time;
         return std::nullopt;
     }
 
     [[nodiscard]] std::optional<OutboundMsg> orderAccepted(TimeNs time, OrderId id) {
         stateChecks();
-        assert(state == State::WAITING_ACCEPT);
-        assert(openOrderId == id);
+        if(id == openOrderId) {
+            assert(state == State::WAITING_ACCEPT);
+            assert(openOrderId == id);
 
-        currentTime = time;
-        return submitCancel(id);
+            currentTime = time;
+            return submitCancel(id);
+        }
+        return std::nullopt;
     }
 
     std::optional<OutboundMsg> orderCancelled(TimeNs time, OrderId id) {
         stateChecks();
-        assert(state == State::WAITING_CANCEL);
-        assert(openOrderId == id);
+        if(id == openOrderId) {
+            assert(state == State::WAITING_CANCEL);
+            assert(openOrderId == id);
 
-        currentTime = time;
-        orderComplete();
+            currentTime = time;
+            orderComplete();
+        }
         return std::nullopt;
     }
 
@@ -150,11 +154,14 @@ public:
 
             if (openOrderQty == 0) {
                 orderComplete();
-            } else if(state == State::WAITING_ACCEPT) {
-                submitCancel(id);
+                stateChecks();
+                return std::nullopt;
+            } else if (state == State::WAITING_ACCEPT) {
+                const optional<OutboundMsg> &msg = submitCancel(id);
+                stateChecks();
+                return msg;
             }
 
-            stateChecks();
         }
         return std::nullopt;
     }

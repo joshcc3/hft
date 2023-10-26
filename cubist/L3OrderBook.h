@@ -30,8 +30,6 @@ struct Order {
     Qty size;
     TimeNs timeNs;
 
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "UnusedValue"
 
     Order(TimeNs timeNs, bool isStrategy, OrderId orderId, Side side, Qty size, PriceL price) : isStrategy{isStrategy},
                                                                                                 orderId{orderId},
@@ -44,7 +42,6 @@ struct Order {
         assert(priceL > 0);
     }
 
-#pragma clang diagnostic pop
 
 };
 
@@ -142,7 +139,7 @@ struct L3Vec {
         return orders.size();
     }
 
-    Qty match(Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg::Trade> &trades) {
+    Qty match(Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg> &trades) {
         assert(stateChecks());
         assert(remainingQty > 0);
         Qty ogQty = remainingQty;
@@ -155,10 +152,10 @@ struct L3Vec {
             if (matchedQty < qtyAtLevel) {
                 removeQty(it, remainingQty);
                 remainingQty = 0;
-                trades.emplace_back(orderId, price, matchedQty);
+                trades.emplace_back(InboundMsg{InboundMsg::Trade{orderId, price, matchedQty}});
                 break;
             } else {
-                trades.emplace_back(orderId, price, qtyAtLevel);
+                trades.emplace_back(InboundMsg{InboundMsg::Trade{orderId, price, qtyAtLevel}});
                 toDel.push_back(orderId);
             }
             remainingQty -= it->second.size;
@@ -219,128 +216,6 @@ private:
 
 };
 
-
-struct L3Map {
-
-    using OrderMap = map<OrderId, Order>;
-
-    const Side side;
-    Qty levelSize;
-    OrderMap orders;
-
-    using const_iterator = OrderMap::const_iterator;
-    using iterator = OrderMap::iterator;
-
-    explicit L3Map(OrderMap &&mp, Side side) :
-
-            orders(mp), levelSize{0}, side{side} {
-        assert(side == Side::BUY || side == Side::SELL);
-        for (const auto &it: mp) {
-            levelSize += it.second.size;
-        }
-    }
-
-    [[nodiscard]] bool empty() const {
-        assert(orders.empty() == (levelSize == 0));
-        return orders.empty();
-    }
-
-    // TODO - use compile time if here
-    [[nodiscard]] const_iterator begin() const {
-        assert(!orders.empty());
-        return orders.begin();
-    }
-
-    iterator begin() {
-        assert(!orders.empty());
-        return orders.begin();
-    }
-
-    [[nodiscard]] const_iterator end() const {
-        assert(!orders.empty());
-        return orders.end();
-    }
-
-    iterator end() {
-        assert(!orders.empty());
-        return orders.end();
-    }
-
-    iterator find(OrderId id) {
-        assert(!orders.empty());
-        const iterator &res = orders.find(id);
-        assert(res != orders.end());
-        return res;
-    }
-
-    pair<iterator, bool> emplace(OrderId orderId, Order order) {
-        assert(!orders.empty());
-        assert(orders.find(orderId) == orders.end());
-        assert(order.orderId == orderId && order.size > 0);
-        assert(order.side == side);
-        levelSize += order.size;
-
-        return orders.emplace(orderId, order);
-    }
-
-    void removeQty(iterator iterator, Qty qty) {
-        assert(qty <= iterator->second.size);
-        iterator->second.size -= qty;
-        levelSize -= qty;
-    }
-
-    void erase(iterator iter) {
-        assert(orders.begin()->second.priceL == iter->second.priceL);
-
-        levelSize -= iter->second.size;
-        orders.erase(iter);
-
-        assert(levelSize >= 0);
-    }
-
-    [[nodiscard]] size_t size() const {
-        assert(levelSize > 0);
-        assert(!orders.empty());
-        return orders.size();
-    }
-
-    Qty match(Qty remainingQty, vector<OrderId> &toDel, vector<InboundMsg::Trade> &trades) {
-        assert(remainingQty > 0);
-        Qty ogQty = remainingQty;
-        auto it = orders.begin();
-        for (; it != orders.end() && remainingQty > 0; ++it) {
-            Qty qtyAtLevel = it->second.size;
-            OrderId orderId = it->second.orderId;
-            PriceL price = it->second.priceL;
-            Qty matchedQty = min(qtyAtLevel, remainingQty);
-            if (matchedQty < qtyAtLevel) {
-                removeQty(it, remainingQty);
-                remainingQty = 0;
-                trades.emplace_back(orderId, price, matchedQty);
-                break;
-            } else {
-                trades.emplace_back(orderId, price, qtyAtLevel);
-                toDel.push_back(orderId);
-            }
-            remainingQty -= it->second.size;
-        }
-        assert(remainingQty < ogQty || it != orders.begin());
-        assert(remainingQty >= 0);
-        return remainingQty;
-    }
-
-private:
-    void stateChecks() {
-        // check that the levelSize matches the sum of the orders
-        // check that all orders within a level have the same price and side and different order ids.
-        // check that the size > 0 for all orders
-        // all keys match the order id of the orders
-        // check that all sizes and prices are positive.
-        // assert that we iterate over the orders in price-time priority
-    }
-
-};
-
 template<typename T>
 using SideLevels = list<T>;
 
@@ -391,55 +266,77 @@ public:
     }
 
 
-    std::vector<InboundMsg::Trade>
+    [[nodiscard]] std::vector<InboundMsg>
     submit(TimeNs t, bool isStrategy, OrderId orderId, Qty size, Side side, // NOLINT(*-no-recursion)
            PriceL priceL) noexcept { // NOLINT(*-no-recursion)
         assert(orderId < STRATEGY_ORDER_ID_START || isStrategy);
-        stateCheck();
+        assert(stateCheck());
         lastUpdateTs = t;
         SideLevels<L3> &levelsOpp = getOppSideLevels(side);
         if (isAggressiveOrder(priceL, levelsOpp, side)) {
             auto [remainingSize, trades] = match(t, levelsOpp, side, size, priceL);
-            trades.emplace_back(InboundMsg::Trade{orderId, priceL, size - remainingSize});
+            trades.emplace_back(InboundMsg{InboundMsg::Trade{orderId, priceL, size - remainingSize}});
             if (remainingSize > 0) {
                 assert(!isAggressiveOrder(priceL, levelsOpp, side));
                 auto ts = submit(t, isStrategy, orderId, remainingSize, side, priceL);
-                assert(ts.empty());
+                assert(ts.size() == 1);
+                trades.push_back(move(ts[0]));
             }
             return trades;
         } else {
             insertLevel(t, isStrategy, orderId, side, size, priceL);
+            return {InboundMsg{InboundMsg::OrderAccepted{orderId}}};
+        }
+    }
+
+    std::vector<InboundMsg> modify(TimeNs t, OrderId oldOrderId, Qty newSize) {
+        stateCheck();
+        lastUpdateTs = t;
+
+        const auto &existingIter = orderIdMap.find(oldOrderId);
+        assert(existingIter != orderIdMap.end() || oldOrderId < STRATEGY_ORDER_ID_START);
+
+        if (existingIter != orderIdMap.end()) {
+            Order &existingOrder = existingIter->second.loc->second;
+            assert(existingOrder.orderId == oldOrderId);
+            assert(existingOrder.size != newSize);
+            if (existingOrder.size < newSize) {
+                cancel(t, oldOrderId);
+                const vector<InboundMsg> &output = submit(lastUpdateTs, existingOrder.isStrategy, oldOrderId, newSize,
+                                                    existingOrder.side, existingOrder.priceL);
+
+                assert(output.size() == 1 && holds_alternative<InboundMsg::OrderAccepted>(output[0].content));
+            } else {
+                existingOrder.size = newSize;
+            }
+            return {InboundMsg{InboundMsg::OrderModified{oldOrderId, newSize}}};
+        } else {
             return {};
         }
+
     }
 
-    void modify(TimeNs t, OrderId oldOrderId, Qty newSize) {
+    std::vector<InboundMsg> cancel(TimeNs t, OrderId orderId) {
         stateCheck();
-        lastUpdateTs = t;
-        const Order existingOrder = cancel(lastUpdateTs, oldOrderId);
-        assert(existingOrder.orderId == oldOrderId);
-        assert(existingOrder.size != newSize);
-        submit(lastUpdateTs, existingOrder.isStrategy, oldOrderId, newSize, existingOrder.side, existingOrder.priceL);
-    }
-
-    Order cancel(TimeNs t, OrderId orderId) {
-        stateCheck();
-        lastUpdateTs = t;
         const auto &elem = orderIdMap.find(orderId);
-        assert(elem != orderIdMap.end());
-        const auto &[id, loc] = *elem;
+        assert(elem != orderIdMap.end() || orderId < STRATEGY_ORDER_ID_START);
+        if (elem != orderIdMap.end()) {
+            lastUpdateTs = t;
+            assert(elem != orderIdMap.end());
+            const auto &[id, loc] = *elem;
 
-        auto &l2 = loc.l2;
-        const Order deletedOrder = loc.loc->second;
-        l2->erase(loc.loc);
-        if (l2->empty()) {
-            getSideLevels(elem->second.side).erase(l2);
+            auto &l2 = loc.l2;
+            const Order deletedOrder = loc.loc->second;
+            l2->erase(loc.loc);
+            if (l2->empty()) {
+                getSideLevels(elem->second.side).erase(l2);
+            }
+            orderIdMap.erase(orderId);
+
+            assert(deletedOrder.orderId == orderId);
+            return {InboundMsg{InboundMsg::OrderCancelled{deletedOrder.orderId}}};
         }
-        orderIdMap.erase(orderId);
-
-        assert(deletedOrder.orderId == orderId);
-
-        return deletedOrder;
+        return {};
     }
 
 
@@ -551,7 +448,7 @@ private:
         }
     }
 
-    pair<Qty, vector<InboundMsg::Trade>>
+    pair<Qty, vector<InboundMsg>>
     match(TimeNs t, SideLevels<L3> &oppLevels, Side side, Qty size, PriceL priceL) noexcept {
         assert(isAggressiveOrder(priceL, oppLevels, side));
         Qty remainingQty = size;
@@ -559,15 +456,15 @@ private:
         static vector<OrderId> orderIDsToDelete;
         orderIDsToDelete.reserve(8);
 
-        vector<InboundMsg::Trade> trades;
+        vector<InboundMsg> trades;
 
         while (remainingQty > 0 && levelIter != oppLevels.end() && isAggPrice(side, priceL, getPriceL(*levelIter))) {
             remainingQty = levelIter->match(remainingQty, orderIDsToDelete, trades);
             ++levelIter;
         }
         for (auto orderID: orderIDsToDelete) {
-            const Order existingOrder = cancel(t, orderID);
-            assert(isAggPrice(side, priceL, existingOrder.priceL));
+            cancel(t, orderID);
+            assert(isAggPrice(side, priceL, orderIdMap.find(orderID)->second.loc->second.priceL));
         }
 
         assert(levelIter == oppLevels.end() || !levelIter->empty() && remainingQty == 0);
