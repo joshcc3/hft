@@ -114,25 +114,22 @@ public:
 
     [[nodiscard]] std::optional<OutboundMsg> orderAccepted(TimeNs time, OrderId id) {
         stateChecks();
-        if(id == openOrderId) {
-            assert(state == State::WAITING_ACCEPT);
-            assert(openOrderId == id);
+        assert(id == openOrderId);
+        assert(state == State::WAITING_ACCEPT);
+        assert(openOrderId == id);
 
-            currentTime = time;
-            return submitCancel(id);
-        }
-        return std::nullopt;
+        currentTime = time;
+        return submitCancel(id);
     }
 
     std::optional<OutboundMsg> orderCancelled(TimeNs time, OrderId id) {
         stateChecks();
-        if(id == openOrderId) {
-            assert(state == State::WAITING_CANCEL);
-            assert(openOrderId == id);
+        assert(id == openOrderId);
+        assert(state == State::WAITING_CANCEL);
+        assert(openOrderId == id);
 
-            currentTime = time;
-            orderComplete();
-        }
+        currentTime = time;
+        orderComplete();
         return std::nullopt;
     }
 

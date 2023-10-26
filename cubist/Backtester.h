@@ -199,15 +199,27 @@ private:
     }
 
     [[nodiscard]] std::optional<OutboundMsg> _processInbound(TimeNs timeNs, const InboundMsg::OrderModified &update) {
-        return strategy.orderModified(timeNs, update.id, update.newQty);
+        if (L3OrderBook<L3Vec>::isStrategyOrder(update.id)) {
+            return strategy.orderModified(timeNs, update.id, update.newQty);
+        } else {
+            return std::nullopt;
+        }
     }
 
     [[nodiscard]] std::optional<OutboundMsg> _processInbound(TimeNs timeNs, const InboundMsg::OrderAccepted &update) {
-        return strategy.orderAccepted(timeNs, update.id);
+        if (L3OrderBook<L3Vec>::isStrategyOrder(update.id)) {
+            return strategy.orderAccepted(timeNs, update.id);
+        } else {
+            return std::nullopt;
+        }
     }
 
     [[nodiscard]] std::optional<OutboundMsg> _processInbound(TimeNs timeNs, const InboundMsg::OrderCancelled &update) {
-        return strategy.orderCancelled(timeNs, update.id);
+        if (L3OrderBook<L3Vec>::isStrategyOrder(update.id)) {
+            return strategy.orderCancelled(timeNs, update.id);
+        } else {
+            return std::nullopt;
+        }
     }
 
     [[nodiscard]] std::optional<OutboundMsg> _processInbound(TimeNs timeNs, const InboundMsg::Trade &update) {

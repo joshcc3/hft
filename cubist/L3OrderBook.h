@@ -375,6 +375,10 @@ public:
     }
 
 
+    static bool isStrategyOrder(OrderId id) {
+        return id >= STRATEGY_ORDER_ID_START;
+    }
+
 private:
     static PriceL getPriceL(const L3 &bids) noexcept {
         assert(!bids.empty());
