@@ -1,7 +1,7 @@
 #include "Strategy.h"
 
-// public messages
-std::optional<OutboundMsg> Strategy::onTopLevelUpdate([[maybe_unused]] TimeNs timeNs, const InboundMsg::TopLevelUpdate &update) {
+std::optional<OutboundMsg>
+Strategy::onTopLevelUpdate([[maybe_unused]] TimeNs timeNs, const InboundMsg::TopLevelUpdate &update) {
     if (update.bidPresent() && update.askPresent()) {
         auto [bidPrice, bidSize, askPrice, askSize] = update;
 
@@ -25,12 +25,11 @@ std::optional<OutboundMsg> Strategy::onTopLevelUpdate([[maybe_unused]] TimeNs ti
         bestAskPrice = askPrice;
         bestAskSize = askSize;
 
-        // Calculate VWAP
         PriceL vwap = (bestBidPrice * bestAskSize + bestAskPrice * bestBidSize) / (bestBidSize + bestAskSize);
 
-        // Update the theoretical value using EWMA
         theoreticalValue =
-                theoreticalValue > 0 ? static_cast<PriceL>(alpha * double(vwap) + (1.0 - alpha) * static_cast<double>(theoreticalValue))
+                theoreticalValue > 0 ? static_cast<PriceL>(alpha * double(vwap) +
+                                                           (1.0 - alpha) * static_cast<double>(theoreticalValue))
                                      : vwap;
 
 
@@ -47,7 +46,7 @@ std::optional<OutboundMsg> Strategy::onTopLevelUpdate([[maybe_unused]] TimeNs ti
 }
 
 std::optional<OutboundMsg> Strategy::orderModified([[maybe_unused]] TimeNs time, [[maybe_unused]] OrderId id,
-                                         [[maybe_unused]] Qty newQty) {
+                                                   [[maybe_unused]] Qty newQty) {
     return std::nullopt;
 }
 

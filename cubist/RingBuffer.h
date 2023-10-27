@@ -7,9 +7,9 @@
 #include <memory>
 
 
-template <typename T>
+template<typename T>
 struct Free {
-    void operator()(T* ptr) {
+    void operator()(T *ptr) {
         std::free(ptr);
     }
 };
@@ -18,8 +18,8 @@ template<typename T, std::size_t Capacity>
 class RingBuffer {
 public:
 
-    RingBuffer() : data{static_cast<T*>(malloc(sizeof(T) * Capacity))}, head{0}, tail{0} {
-        if(data == NULL) {
+    RingBuffer() : data{static_cast<T *>(malloc(sizeof(T) * Capacity))}, head{0}, tail{0} {
+        if (data == NULL) {
             throw std::bad_alloc();
         }
     }
@@ -50,13 +50,6 @@ public:
 
         new(&data[tail]) T(std::forward<Args>(args)...);
         tail = next(tail);
-    }
-
-    T &front() {
-        assert(!empty());
-        check();
-
-        return data[head];
     }
 
     const T &front() const {

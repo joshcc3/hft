@@ -1,7 +1,6 @@
 #include "Backtester.h"
 #include <functional>
 #include <iostream>
-#include <fstream>
 #include <string>
 
 
@@ -21,12 +20,14 @@ std::vector<InboundMsg> Backtester::processOutbound(TimeNs timeNs, const T &upda
     return _processOutbound(timeNs, update);
 }
 
-[[nodiscard]] std::optional<OutboundMsg> Backtester::_processInbound(TimeNs timeNs, const InboundMsg::TopLevelUpdate &update) {
+[[nodiscard]] std::optional<OutboundMsg>
+Backtester::_processInbound(TimeNs timeNs, const InboundMsg::TopLevelUpdate &update) {
 
     return strategy.onTopLevelUpdate(timeNs, update);
 }
 
-[[nodiscard]] std::optional<OutboundMsg> Backtester::_processInbound(TimeNs timeNs, const InboundMsg::OrderModified &update) {
+[[nodiscard]] std::optional<OutboundMsg>
+Backtester::_processInbound(TimeNs timeNs, const InboundMsg::OrderModified &update) {
     if (L3OrderBook<L3Vec>::isStrategyOrder(update.id)) {
         return strategy.orderModified(timeNs, update.id, update.newQty);
     } else {
@@ -34,7 +35,8 @@ std::vector<InboundMsg> Backtester::processOutbound(TimeNs timeNs, const T &upda
     }
 }
 
-[[nodiscard]] std::optional<OutboundMsg> Backtester::_processInbound(TimeNs timeNs, const InboundMsg::OrderAccepted &update) {
+[[nodiscard]] std::optional<OutboundMsg>
+Backtester::_processInbound(TimeNs timeNs, const InboundMsg::OrderAccepted &update) {
     if (L3OrderBook<L3Vec>::isStrategyOrder(update.id)) {
         return strategy.orderAccepted(timeNs, update.id);
     } else {
@@ -42,7 +44,8 @@ std::vector<InboundMsg> Backtester::processOutbound(TimeNs timeNs, const T &upda
     }
 }
 
-[[nodiscard]] std::optional<OutboundMsg> Backtester::_processInbound(TimeNs timeNs, const InboundMsg::OrderCancelled &update) {
+[[nodiscard]] std::optional<OutboundMsg>
+Backtester::_processInbound(TimeNs timeNs, const InboundMsg::OrderCancelled &update) {
     if (L3OrderBook<L3Vec>::isStrategyOrder(update.id)) {
         return strategy.orderCancelled(timeNs, update.id);
     } else {
@@ -85,27 +88,25 @@ std::vector<InboundMsg> Backtester::_processOutbound(TimeNs timeNs, const Outbou
 #pragma clang diagnostic ignored "-Wunused-result"
 
 void Backtester::mdEvent(const std::string &line) {
-    // 1. Parse the incoming market data event
 
     TimeNs eventNs{0};
     char _msgType[20] = {};
     OrderId id{0};
-    int matched = sscanf(line.c_str(), "%ld,%s%ld", &eventNs, _msgType, &id); // NOLINT(*-err34-c)
+    const int matched = sscanf(line.c_str(), "%ld,%s%ld", &eventNs, _msgType, &id); // NOLINT(*-err34-c)
     assert(matched == 3 && id > 0 && eventNs > 0);
 
-    // TODO update current time
     bool outstandingMsgs = true;
-    // 2. Process the messages in the std::vectors up to the timestamp of the current event
+
     while (outstandingMsgs) {
-        TimeNs initialTime = currentTime;
-        size_t q1 = stratToExchange.size();
-        size_t q2 = exchangeToStrat.size();
+        const TimeNs initialTime = currentTime;
+        const size_t q1 = stratToExchange.size();
+        const size_t q2 = exchangeToStrat.size();
 
-        TimeNs inTime = !exchangeToStrat.empty() ? exchangeToStrat.front().first : MAX_TIME;
-        TimeNs outTime = !stratToExchange.empty() ? stratToExchange.front().first : MAX_TIME;
+        const TimeNs inTime = !exchangeToStrat.empty() ? exchangeToStrat.front().first : MAX_TIME;
+        const TimeNs outTime = !stratToExchange.empty() ? stratToExchange.front().first : MAX_TIME;
 
-        bool inMsgFirst = inTime <= eventNs && inTime <= outTime;
-        bool outMsgFirst = outTime <= eventNs && outTime < inTime;
+        const bool inMsgFirst = inTime <= eventNs && inTime <= outTime;
+        const bool outMsgFirst = outTime <= eventNs && outTime < inTime;
 
         assert(!(inMsgFirst && outMsgFirst));
 
@@ -145,8 +146,8 @@ void Backtester::mdEvent(const std::string &line) {
             exchangeToStrat.emplace_back(currentTime + cfg.exchangeStratLatency, InboundMsg{lob.cached});
         }
 
-        bool inNotEmpty = !exchangeToStrat.empty();
-        bool outNotEmpty = !stratToExchange.empty();
+        const bool inNotEmpty = !exchangeToStrat.empty();
+        const bool outNotEmpty = !stratToExchange.empty();
 
         assert(currentTime >= initialTime);
         assert(currentTime <= eventNs);
@@ -164,12 +165,12 @@ void Backtester::mdEvent(const std::string &line) {
             char _side{'-'};
             Qty qty{-1};
             float priceF{0};
-            int matchedA = sscanf(line.c_str(), "%ld,%s%ld, %c,%d,%f", &eventNs, _msgType, &orderId, &_side,
-                                  &qty, // NOLINT(*-err34-c)
-                                  &priceF);
+            const int matchedA = sscanf(line.c_str(), "%ld,%s%ld, %c,%d,%f", &eventNs, _msgType, &orderId, &_side,
+                                        &qty, // NOLINT(*-err34-c)
+                                        &priceF);
             assert(matchedA == 6 && orderId > 0 && (_side == 'B' || _side == 'S') && priceF > 0 && qty > 0);
-            Side side = _side == 'B' ? Side::BUY : Side::SELL;
-            PriceL priceL{PriceL(priceF * double(PRECISION))};
+            const Side side = _side == 'B' ? Side::BUY : Side::SELL;
+            const PriceL priceL{PriceL(priceF * double(PRECISION))};
             const std::vector<InboundMsg> msgs = processOutbound(eventNs,
                                                                  OutboundMsg::Submit(false,
                                                                                      orderId, side, priceL,
@@ -195,7 +196,7 @@ void Backtester::mdEvent(const std::string &line) {
         }
         default: {
             std::cerr << "Unexpected type [" << _msgType << "]." << std::endl;
-
+            exit(1);
         }
 
     }
@@ -212,45 +213,3 @@ void Backtester::mdEvent(const std::string &line) {
 }
 
 #pragma clang diagnostic pop
-
-int main(int argc, char *argv[]) {
-    if(argc != 4) {
-        std::cerr << "Usage: [./backtester [exchange-strat-latency] [strategy-exchange-latency] [input-file]]" << std::endl;
-        exit(1);
-    }
-
-    TimeNs exchangeStratLatency = atoi(argv[1]);
-    TimeNs stratExchangeLatency = atoi(argv[2]);
-    std::string inputFile = std::string(argv[3]);
-
-    if(exchangeStratLatency <= 0 || stratExchangeLatency <= 0) {
-        std::cerr << "Latencies must be > 0." << std::endl;
-    }
-
-    std::ifstream ifile(inputFile);
-    if (!ifile) {
-        std::cerr << "Failed to open the file." << std::endl;
-        return 1;
-    }
-
-    BacktestCfg cfg{exchangeStratLatency, stratExchangeLatency};
-
-    L3OrderBook<L3Vec> lob;
-    std::function<OrderId()> nextOrderId = [lob]() mutable { return lob.nextOrderId(); };
-    Strategy strategy{0.1, 0.005, 100'000, nextOrderId};
-
-    Logger l;
-    std::vector<BacktestListener*> ls{&l};
-
-    Backtester b{cfg, strategy, lob, ls};
-
-    std::string line;
-    while (std::getline(ifile, line)) {
-        b.mdEvent(line);
-    }
-
-    std::cout << std::endl;
-
-    return 0;
-
-}

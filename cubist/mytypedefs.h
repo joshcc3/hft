@@ -25,7 +25,6 @@ using TimeNs = u64;
 inline PriceL PRECISION = 1e9;
 
 
-// Message types encapsulated in a union
 struct InboundMsg {
 
     struct TopLevelUpdate {
@@ -98,7 +97,7 @@ struct OutboundMsg {
                Side side,
                PriceL orderPrice,
                Qty size) : isStrategy{isStrategy}, orderId{orderId}, side{side}, orderPrice{orderPrice},
-                                size{size} {}
+                           size{size} {}
     };
 
     struct Cancel {
@@ -122,12 +121,6 @@ struct OutboundMsg {
 };
 
 
-enum class OrderMsgType {
-    ADD,
-    UPDATE,
-    DELETE
-};
-
 inline bool operator==(InboundMsg::TopLevelUpdate a, InboundMsg::TopLevelUpdate b) {
     return a.askSize == b.askSize && a.bidSize == b.bidSize && a.askPrice == b.askPrice && a.bidPrice == b.bidPrice;
 }
@@ -140,7 +133,6 @@ inline T abs(T x) {
 inline double getPriceF(PriceL p) {
     return round(double(p) / (PRECISION / 100)) / 100;
 }
-
 
 
 #endif //HFT_MYTYPEDEFS_H

@@ -23,6 +23,8 @@ struct A {
     auto getValue() -> std::conditional_t<IsConst, const int &, int &> {
         if constexpr (IsConst) {
             return x;
+        } else {
+            return x;
         }
     }
 
@@ -39,7 +41,52 @@ struct A {
 //    }
 };
 
+struct C {
+    static int x;
+    C() {
+        cout << "DC: " << ++C::x << endl;
+    }
+
+    C(const C& cp) {
+        cout << "CC: " << ++C::x << endl;
+    }
+
+    C& operator=(const C& a) {
+        if(this == &a) {
+            return *this;
+        }
+        cout << "AC: " << ++C::x << endl;
+        return *this;
+    }
+
+    C(const C&& a) = delete;
+    C(C&& a) = delete;
+    C& operator=(C&& a) = delete;
+
+    void f() {
+
+    }
+
+    ~C() {
+        --C::x;
+    }
+};
+
+int C::x = 0;
+
+
 int main() {
+    using P = pair<int, C>;
+    map<int, P> mp;
+    mp.emplace(0, P{});
+    cout << "Mp constructed" << endl;
+    mp.find(0)->second.second.f();
+    cout << "Completed" << endl;
+}
+
+
+
+int main1() {
 
     for (int SZ = 10; SZ <= 200; ++SZ) {
         int ITERS = 100'000;
@@ -98,4 +145,6 @@ int main() {
             cout << SZ << ",Map," << double(timeNs) / ITERS << endl;
         }
     }
+
+    return 0;
 }

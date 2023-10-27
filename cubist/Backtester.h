@@ -14,11 +14,6 @@
 #include "BacktestListener.cpp"
 
 
-// TODO - mark all functions noexcept
-// TODO - how do we deal with the fact that in our backtester there might be modifies or deletes
-// in the marketdata for orders that have been matched and therefore don't exist in the marketdata?
-// Do we simply ignore those updates for order ids that don't exist accepting that inaccuracy?
-
 struct BacktestCfg {
     TimeNs exchangeStratLatency;
     TimeNs stratExchangeLatency;
@@ -28,12 +23,13 @@ class Backtester {
     constexpr static TimeNs MAX_TIME = (TimeNs(1) << 63);
 public:
     Backtester(BacktestCfg cfg, Strategy &s, L3OrderBook<L3Vec> &ob, std::vector<BacktestListener *> &ls) : cfg{cfg},
-                                                                                                       strategy(s),
-                                                                                                       lob{ob},
-                                                                                                       currentTime(0),
-                                                                                                       exchangeToStrat{},
-                                                                                                       stratToExchange{},
-                                                                                                       ls{ls} {}
+                                                                                                            strategy(s),
+                                                                                                            lob{ob},
+                                                                                                            currentTime(
+                                                                                                                    0),
+                                                                                                            exchangeToStrat{},
+                                                                                                            stratToExchange{},
+                                                                                                            ls{ls} {}
 
     void mdEvent(const std::string &line);
 
@@ -49,8 +45,6 @@ private:
     RingBuffer<std::pair<TimeNs, InboundMsg>, RING_BUFFER_CAPACITY> exchangeToStrat;
     RingBuffer<std::pair<TimeNs, OutboundMsg>, RING_BUFFER_CAPACITY> stratToExchange;
     TimeNs currentTime;
-
-    // Processing function for each outbound type
 
     template<typename T>
     std::optional<OutboundMsg> processInbound(TimeNs timeNs, const T &update);

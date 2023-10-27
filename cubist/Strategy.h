@@ -13,14 +13,11 @@
 
 
 class Strategy {
-    // Enum for the side of the order
 
-    // Parameters
     const double alpha;
     const double thresholdBps;
     const PriceL maxNotional; // Max inventory notional
 
-    // State variables
 
     std::function<OrderId()> nextOrderId;
 
