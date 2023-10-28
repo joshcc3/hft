@@ -1,6 +1,9 @@
 #ifndef HFT_L3ORDERBOOK_H
 #define HFT_L3ORDERBOOK_H
 
+#define NDEBUG
+
+#include <chrono>
 #include <algorithm>
 #include <cstdint>
 #include <cassert>
@@ -12,8 +15,12 @@
 #include <cmath>
 #include <array>
 #include <numeric>
+#include <unordered_map>
 #include <unordered_set>
 #include <map>
+#include "mytypedefs.h"
+
+
 
 
 struct Order {
@@ -292,7 +299,7 @@ public:
     }
 
 
-    [[nodiscard]] std::vector<InboundMsg>
+    std::vector<InboundMsg>
     submit(TimeNs t, bool isStrategy, OrderId orderId, Qty size, Side side, // NOLINT(*-no-recursion)
            PriceL priceL) noexcept { // NOLINT(*-no-recursion)
         assert(orderId < STRATEGY_ORDER_ID_START || isStrategy);
@@ -300,7 +307,18 @@ public:
         assert(stateCheck());
         lastUpdateTs = t;
         SideLevels<L3> &levelsOpp = getOppSideLevels(side);
-        if (isAggressiveOrder(priceL, levelsOpp, side)) {
+        if (!isAggressiveOrder(priceL, levelsOpp, side)) {
+            {
+                auto _s = std::chrono::system_clock::now();
+                int i = 2;
+                insertLevel(t, isStrategy, orderId, side, size, priceL);
+                auto _e = std::chrono::system_clock::now();
+                timeSpent[i] += elapsed(_s, _e);
+                return {InboundMsg{InboundMsg::OrderAccepted{orderId}}};
+
+            };
+
+        } else {
             auto [remainingSize, trades] = match(t, levelsOpp, side, size, priceL);
             trades.emplace_back(InboundMsg{InboundMsg::Trade{orderId, priceL, size - remainingSize}});
             if (remainingSize > 0) {
@@ -310,9 +328,6 @@ public:
                 trades.push_back(ts[0]);
             }
             return move(trades);
-        } else {
-            insertLevel(t, isStrategy, orderId, side, size, priceL);
-            return {InboundMsg{InboundMsg::OrderAccepted{orderId}}};
         }
     }
 
@@ -551,3 +566,4 @@ private:
 
 
 #endif //HFT_L3ORDERBOOK_H
+

@@ -15,6 +15,60 @@
 
 using namespace std;
 
+int scorePos(string board[3], int i, int j) {
+
+    if(board[i][j] != '.') {
+        return -30;
+    }
+
+    int rowCount = 0;
+    int colCount = 0;
+    int diagCount1 = 0;
+    int diagCount2 = 0;
+    for(int x = 0; x < 3; x++) {
+        rowCount += (board[i][x] == 'X') - (board[i][x] == 'O');
+        colCount += (board[x][j] == 'X') - (board[x][j] == 'O');
+        diagCount1 += (board[x][x] == 'X') - (board[x][x] == 'O');
+        diagCount2 += (board[2 - x][x] == 'X') - (board[2 - x][x] == 'O');
+    }
+
+    diagCount1 = i == j ? diagCount1 : 0;
+    diagCount2 = i + j == 2? diagCount2 : 0;
+
+    if(max(abs(rowCount), max(abs(colCount), max(abs(diagCount1), abs(diagCount2)))) == 2) {
+        return 15;
+    } else {
+        return abs(rowCount + colCount + diagCount1 + diagCount2);
+    }
+
+}
+
+void solveTicTacToe(string board[3]) {
+    int score = -30;
+    pair<int, int> result;
+    for(int i = 0; i < 3; ++i) {
+        for(int j = 0; j < 3; ++j) {
+            int s = scorePos(board, i, j);
+            if(s > score) {
+                result.first = i;
+                result.second = j;
+                score = s;
+            }
+        }
+    }
+
+    cout << result.first << " " << result.second << endl;
+}
+
+int main() {
+    string board[3] = {"XOX",
+                       "O..",
+                       "O.O"};
+    solveTicTacToe(board);
+}
+
+
+
 struct A {
 
     int x;
@@ -75,7 +129,7 @@ struct C {
 int C::x = 0;
 
 
-int main() {
+int main123() {
     using P = pair<int, C>;
     map<int, P> mp;
     mp.emplace(0, P{});

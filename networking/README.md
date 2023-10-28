@@ -1,0 +1,3 @@
+https://blog.cloudflare.com/kernel-bypass/
+
+https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/virtualization_deployment_and_administration_guide/chap-guest_virtual_machine_device_configuration#proc-PCI_devices-Preparing_an_Intel_system_for_PCI_device_assignment

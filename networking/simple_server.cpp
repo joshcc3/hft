@@ -9,7 +9,7 @@
 #include "errno.h"
 
 
-int simpleServer() {
+inline int simpleServer() {
     int server_fd, client_fd, valread;
     struct sockaddr_in address;
     int opt = 1;
@@ -71,9 +71,7 @@ int simpleServer() {
         }
 
         valread = read(client_fd, buffer, 1024);
-        std::cout << "Received: [" << buffer << "]" << "[" << valread << "]" << std::endl;
-        send(client_fd, "hello\0", 5, 0);
-        std::cout << "Echo message sent" << std::endl;
+//        send(client_fd, buffer, valread, 0);
         close(client_fd);
     }
 
