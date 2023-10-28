@@ -33,15 +33,15 @@ int main() {
         Qty size = 1;
         constexpr Side side = Side::BUY;
         PriceL price = 98 * PRECISION;
-        book.submit<Side::BUY>(time, false, id, size, price);
+        book.submit<side>(time, false, id, size, price);
     }
     {
         ++time;
         ++id;
         Qty size = 1;
-        Side side = Side::SELL;
+        constexpr Side side = Side::SELL;
         PriceL price = 102 * PRECISION;
-        book.submit<Side::SELL>(time, false, id, size, price);
+        book.submit<side>(time, false, id, size, price);
     }
 
 
@@ -51,6 +51,7 @@ int main() {
     PriceL price = 99 * PRECISION;
 
     auto start = chrono::system_clock::now();
+
 
     for (int i = 0; i < 1'000'000; ++i) {
         ++time;

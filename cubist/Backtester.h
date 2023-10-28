@@ -62,6 +62,8 @@ private:
 
     [[nodiscard]] std::optional<OutboundMsg> _processInbound(TimeNs timeNs, const InboundMsg::Trade &update);
 
+    [[nodiscard]] std::optional<OutboundMsg> _processInbound(TimeNs timeNs, const InboundMsg::Noop &update);
+
     [[nodiscard]] std::vector<InboundMsg> _processOutbound(TimeNs timeNs, const OutboundMsg::Submit &submit);
 
     std::vector<InboundMsg> _processOutbound(TimeNs timeNs, const OutboundMsg::Cancel &cancel);

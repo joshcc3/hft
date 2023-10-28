@@ -15,10 +15,10 @@
 #define assert(expr) void(0)
 #endif
 
- double timeSpent[10] = {0, 0, 0, 0, 0};
+inline double timeSpent[10] = {0, 0, 0, 0, 0};
 
 template<typename T>
-double elapsed(T t1, T t2) {
+inline double elapsed(T t1, T t2) {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count() / 1000000000.0;
 
 }
@@ -101,8 +101,12 @@ struct InboundMsg {
         Qty qty;
     };
 
+    struct Noop {
 
-    std::variant<TopLevelUpdate, OrderModified, OrderAccepted, OrderCancelled, Trade> content;
+    };
+
+
+    std::variant<TopLevelUpdate, OrderModified, OrderAccepted, OrderCancelled, Trade, Noop> content;
 };
 
 

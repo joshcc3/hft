@@ -18,6 +18,7 @@ public:
     virtual void processInbound(TimeNs timeNs, const InboundMsg::OrderCancelled &update) = 0;
 
     virtual void processInbound(TimeNs timeNs, const InboundMsg::Trade &update) = 0;
+    virtual void processInbound(TimeNs timeNs, const InboundMsg::Noop &update) = 0;
 
     virtual void processOutbound(TimeNs timeNs, const OutboundMsg::Submit &submit) = 0;
 
@@ -68,6 +69,10 @@ public:
         std::cout << output;
     }
 
+    void processInbound(TimeNs timeNs, const InboundMsg::Noop &update) override {
+    }
+
+
     void processOutbound(TimeNs timeNs, const OutboundMsg::Submit &submit) override {
         char output[100];
         const char *fmt = "<,%lld,N,%b,%lld,%c,%f,%d\n";
@@ -90,6 +95,7 @@ public:
         sprintf(output, fmt, timeNs, modify.id, modify.size);
         std::cout << output;
     }
+
 
 };
 

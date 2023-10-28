@@ -53,35 +53,44 @@ Backtester::_processInbound(TimeNs timeNs, const InboundMsg::OrderCancelled &upd
     }
 }
 
+[[nodiscard]] std::optional<OutboundMsg>
+Backtester::_processInbound(TimeNs timeNs, const InboundMsg::Noop &update) {
+    return std::nullopt;
+}
+
 [[nodiscard]] std::optional<OutboundMsg> Backtester::_processInbound(TimeNs timeNs, const InboundMsg::Trade &update) {
     return strategy.trade(timeNs, update.id, update.price, update.qty);
 }
 
 [[nodiscard]] std::vector<InboundMsg> Backtester::_processOutbound(TimeNs timeNs, const OutboundMsg::Submit &submit) {
-    const std::vector<InboundMsg> &output =
-            lob.submit(timeNs, submit.isStrategy, submit.orderId, submit.size,
-                       submit.side, submit.orderPrice);
-    assert(all_of(output.begin(), output.end() - 1,
-                  [](const InboundMsg &msg) { return std::holds_alternative<InboundMsg::Trade>(msg.content); })
-           && (std::holds_alternative<InboundMsg::OrderAccepted>((output.end() - 1)->content)
-               || std::holds_alternative<InboundMsg::Trade>((output.end() - 1)->content)));
-    return output;
+    const SubmitT output = lob.submit(timeNs, submit.isStrategy, submit.orderId, submit.size,
+                                                          submit.side,
+                                                          submit.orderPrice);
+    if(output.tag == 0) {
+        return {output.res.accept};
+    } else if(output.tag == 1) {
+        assert(output.size > 1 && output.res.msgs != nullptr && std::holds_alternative<InboundMsg::Trade>(output.res.msgs->content));
+        std::vector<InboundMsg> v(output.res.msgs, output.res.msgs + output.size);
+        assert(all_of(output.begin(), output.end() - 1,
+                      [](const InboundMsg &msg) { return std::holds_alternative<InboundMsg::Trade>(msg.content); })
+               && (std::holds_alternative<InboundMsg::OrderAccepted>((output.end() - 1)->content)
+                   || std::holds_alternative<InboundMsg::Trade>((output.end() - 1)->content)));
+        return v;
+    }
 }
 
 std::vector<InboundMsg> Backtester::_processOutbound(TimeNs timeNs, const OutboundMsg::Cancel &cancel) {
-    const std::vector<InboundMsg> &output = lob.cancel(timeNs, cancel.id);
-    assert(output.empty() ||
-           output.size() == 1 && std::holds_alternative<InboundMsg::OrderCancelled>(output[0].content));
-    return output;
+    const InboundMsg &output = lob.cancel(timeNs, cancel.id);
+    assert(std::holds_alternative<InboundMsg::Noop>(output.content) ||
+           std::holds_alternative<InboundMsg::OrderCancelled>(output.content));
+    return {output};
 }
 
 std::vector<InboundMsg> Backtester::_processOutbound(TimeNs timeNs, const OutboundMsg::Modify &modify) {
-    const std::vector<InboundMsg> &output = lob.modify(timeNs, modify.id, modify.size);
-    assert(all_of(output.begin(), output.end() - 1,
-                  [](const InboundMsg &msg) { return std::holds_alternative<InboundMsg::Trade>(msg.content); })
-           && (std::holds_alternative<InboundMsg::OrderModified>((output.end() - 1)->content)
-               || std::holds_alternative<InboundMsg::Trade>((output.end() - 1)->content)));
-    return output;
+    const InboundMsg &output = lob.modify(timeNs, modify.id, modify.size);
+    assert(std::holds_alternative<InboundMsg::Noop>(output.content) ||
+           std::holds_alternative<InboundMsg::OrderModified>(output.content));
+    return {output};
 }
 
 #pragma clang diagnostic push
