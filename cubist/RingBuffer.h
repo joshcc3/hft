@@ -1,6 +1,9 @@
 #ifndef HFT_RING_BUFFER_H
 #define HFT_RING_BUFFER_H
 
+#define NDEBUG
+
+
 #include <cstddef>
 #include <vector>
 #include <cassert>
@@ -35,7 +38,7 @@ public:
     }
 
     [[nodiscard]] std::size_t size() const noexcept {
-        check();
+        assert(check());
         if (tail >= head) {
             return tail - head;
         } else {
@@ -46,7 +49,7 @@ public:
     template<typename... Args>
     void emplace_back(Args &&... args) {
         assert(!full());
-        check();
+        assert(check());
 
         new(&data[tail]) T(std::forward<Args>(args)...);
         tail = next(tail);
@@ -54,14 +57,16 @@ public:
 
     const T &front() const {
         assert(!empty());
-        check();
+        assert(check());
 
         return data[head];
     }
 
     void pop() {
         assert(!empty());
-        check();
+        assert(check());
+
+        data[head].~T();
 
         head = next(head);
     }
@@ -75,9 +80,10 @@ private:
         return (current + 1) % Capacity;
     }
 
-    void check() const {
+    bool check() const {
         assert(head < Capacity);
         assert(tail < Capacity);
+        return true;
     }
 };
 
