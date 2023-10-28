@@ -43,3 +43,6 @@ They would also need to handle exchange timeouts and cancel on disconnect logic.
 The pnl also consists of a large number of costs, like trading fees, borrow costs, marketdata costs,
 If the connection falls too far behind the exchange would usually terminate the connection.
 We would need to handle reconnection to exchanges as well.
+
+
+"deribit,BTC-PERPETUAL,1585734999117000,1585734999132100,false,bid,6295.5,155610"

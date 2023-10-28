@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.26)
 project(cubist)
 project(obtester)
+project(tictactoe)
 set(CMAKE_CXX_STANDARD 17)
+
+find_package(Boost 1.78.0 COMPONENTS iostreams REQUIRED)
 
 
 add_executable(cubist
@@ -13,7 +16,11 @@ add_executable(cubist
         cubist/Backtester.cpp
         cubist/BacktestListener.cpp
         cubist/Strategy.cpp
+        cubist/L3LevelAlloc.h
+        cubist/L3LevelAlloc.cpp
         cubist/main.cpp
+        cubist/SPSC.cpp
+        cubist/SPSC.h
 )
 add_executable(networking networking/epoll_test.cpp
         networking/simple_server.cpp
@@ -24,6 +31,18 @@ add_executable(networking networking/epoll_test.cpp
 
 add_executable(debug debug.cpp)
 
-add_executable(obtester cubist/orderbook_tester.cpp)
+add_executable(obtester
+        cubist/orderbook_tester.cpp
+        cubist/Strategy.h
+        cubist/mytypedefs.h
+        cubist/L3OrderBook.h
+        cubist/L3LevelAlloc.h
+        cubist/L3LevelAlloc.cpp
+)
+
+add_executable(tictactoe
+        networking/tictactoegames.cpp
+)
 
 target_link_libraries(networking uring)
+target_link_libraries(cubist Boost::iostreams)

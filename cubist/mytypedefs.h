@@ -15,10 +15,10 @@
 #define assert(expr) void(0)
 #endif
 
- double timeSpent[10] = {0, 0, 0, 0, 0};
+inline double timeSpent[10] = {0, 0, 0, 0, 0};
 
 template<typename T>
-double elapsed(T t1, T t2) {
+inline double elapsed(T t1, T t2) {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count() / 1000000000.0;
 
 }
@@ -49,7 +49,7 @@ using PriceL = i64;
 using NotionalL = i64;
 using TimeNs = u64;
 
-inline PriceL PRECISION = 1e9;
+inline constexpr PriceL PRECISION = 1e9;
 
 
 struct InboundMsg {
@@ -101,8 +101,12 @@ struct InboundMsg {
         Qty qty;
     };
 
+    struct Noop {
 
-    std::variant<TopLevelUpdate, OrderModified, OrderAccepted, OrderCancelled, Trade> content;
+    };
+
+
+    std::variant<TopLevelUpdate, OrderModified, OrderAccepted, OrderCancelled, Trade, Noop> content;
 };
 
 
@@ -137,11 +141,12 @@ struct OutboundMsg {
 
     struct Modify {
         OrderId id;
+        PriceL price;
         Qty size;
 
         Modify() = delete;
 
-        Modify(OrderId id, Qty size) : id{id}, size{size} {}
+        Modify(OrderId id, PriceL priceL, Qty size) : id{id}, size{size}, price{priceL} {}
     };
 
     std::variant<Submit, Cancel> content;
@@ -159,6 +164,10 @@ inline T abs(T x) {
 
 inline double getPriceF(PriceL p) {
     return round(double(p) / (PRECISION / 100)) / 100;
+}
+
+inline OrderId l2OrderId(OrderId orderId, Side side) {
+    return (orderId << 1) | (side == Side::BUY ? 0 : 1);
 }
 
 

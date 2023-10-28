@@ -18,6 +18,7 @@ public:
     virtual void processInbound(TimeNs timeNs, const InboundMsg::OrderCancelled &update) = 0;
 
     virtual void processInbound(TimeNs timeNs, const InboundMsg::Trade &update) = 0;
+    virtual void processInbound(TimeNs timeNs, const InboundMsg::Noop &update) = 0;
 
     virtual void processOutbound(TimeNs timeNs, const OutboundMsg::Submit &submit) = 0;
 
@@ -42,21 +43,21 @@ public:
 
     void processInbound(TimeNs timeNs, const InboundMsg::OrderModified &update) override {
         char output[100];
-        const char *fmt = ">,%lld,M,%d,%d\n";
+        const char *fmt = ">,%lld,M,%lld,%d\n";
         sprintf(output, fmt, timeNs, update.id, update.newQty);
         std::cout << output;
     }
 
     void processInbound(TimeNs timeNs, const InboundMsg::OrderAccepted &update) override {
         char output[100];
-        const char *fmt = ">,%lld,A,%d\n";
+        const char *fmt = ">,%lld,A,%lld\n";
         sprintf(output, fmt, timeNs, update.id);
         std::cout << output;
     }
 
     void processInbound(TimeNs timeNs, const InboundMsg::OrderCancelled &update) override {
         char output[100];
-        const char *fmt = ">,%lld,C,%d\n";
+        const char *fmt = ">,%lld,C,%lld\n";
         sprintf(output, fmt, timeNs, update.id);
         std::cout << output;
     }
@@ -67,6 +68,10 @@ public:
         sprintf(output, fmt, timeNs, update.id, getPriceF(update.price), update.qty);
         std::cout << output;
     }
+
+    void processInbound(TimeNs timeNs, const InboundMsg::Noop &update) override {
+    }
+
 
     void processOutbound(TimeNs timeNs, const OutboundMsg::Submit &submit) override {
         char output[100];
@@ -79,7 +84,7 @@ public:
 
     void processOutbound(TimeNs timeNs, const OutboundMsg::Cancel &cancel) override {
         char output[100];
-        const char *fmt = "<,%lld,C,%d\n";
+        const char *fmt = "<,%lld,C,%lld\n";
         sprintf(output, fmt, timeNs, cancel.id);
         std::cout << output;
     }
@@ -90,6 +95,7 @@ public:
         sprintf(output, fmt, timeNs, modify.id, modify.size);
         std::cout << output;
     }
+
 
 };
 

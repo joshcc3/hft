@@ -1,14 +1,14 @@
 #include "Strategy.h"
 
 std::optional<OutboundMsg>
-Strategy::onTopLevelUpdate([[maybe_unused]] TimeNs timeNs, const InboundMsg::TopLevelUpdate &update) {
+Strategy::_onTopLevelUpdate([[maybe_unused]] TimeNs timeNs, const InboundMsg::TopLevelUpdate &update) {
     if (update.bidPresent() && update.askPresent()) {
         auto [bidPrice, bidSize, askPrice, askSize] = update;
 
         assert(bidPrice < askPrice);
         assert(bidSize > 0 && askSize > 0);
-        assert(bidPrice < 100000000 / bidSize * PRECISION);
-        assert(askPrice < 100000000 / askSize * PRECISION);
+        assert(bidPrice < 10000000000 / bidSize * PRECISION);
+        assert(askPrice < 10000000000 / askSize * PRECISION);
         assert(bestBidSize <= 0 || abs(bestBidPrice - bidPrice) / double(bestBidPrice) < 0.5);
         assert(bestAskSize <= 0 || abs(bestAskPrice - askPrice) / double(bestAskPrice) < 0.5);
         assert(bestAskSize <= 0 || bidPrice < bestAskPrice);
@@ -45,12 +45,12 @@ Strategy::onTopLevelUpdate([[maybe_unused]] TimeNs timeNs, const InboundMsg::Top
     }
 }
 
-std::optional<OutboundMsg> Strategy::orderModified([[maybe_unused]] TimeNs time, [[maybe_unused]] OrderId id,
+std::optional<OutboundMsg> Strategy::_orderModified([[maybe_unused]] TimeNs time, [[maybe_unused]] OrderId id,
                                                    [[maybe_unused]] Qty newQty) {
     return std::nullopt;
 }
 
-[[nodiscard]] std::optional<OutboundMsg> Strategy::orderAccepted([[maybe_unused]] TimeNs time, OrderId id) {
+[[nodiscard]] std::optional<OutboundMsg> Strategy::_orderAccepted([[maybe_unused]] TimeNs time, OrderId id) {
     stateChecks();
     assert(id == openOrderId);
     assert(state == State::WAITING_ACCEPT);
@@ -59,7 +59,7 @@ std::optional<OutboundMsg> Strategy::orderModified([[maybe_unused]] TimeNs time,
     return submitCancel(id);
 }
 
-std::optional<OutboundMsg> Strategy::orderCancelled([[maybe_unused]] TimeNs time, OrderId id) {
+std::optional<OutboundMsg> Strategy::_orderCancelled([[maybe_unused]] TimeNs time, OrderId id) {
     stateChecks();
     assert(id == openOrderId);
     assert(state == State::WAITING_CANCEL);
@@ -69,7 +69,7 @@ std::optional<OutboundMsg> Strategy::orderCancelled([[maybe_unused]] TimeNs time
     return std::nullopt;
 }
 
-std::optional<OutboundMsg> Strategy::trade([[maybe_unused]] TimeNs time, OrderId id, PriceL price, Qty qty) {
+std::optional<OutboundMsg> Strategy::_trade([[maybe_unused]] TimeNs time, OrderId id, PriceL price, Qty qty) {
     stateChecks();
     assert(price <= 1e6 * PRECISION);
     assert(qty <= 1e6 * PRECISION);
@@ -98,7 +98,7 @@ std::optional<OutboundMsg> Strategy::trade([[maybe_unused]] TimeNs time, OrderId
     return std::nullopt;
 }
 
-[[nodiscard]] std::optional<OutboundMsg> Strategy::submitOrder(Side side, PriceL price, Qty size) {
+[[nodiscard]] std::optional<OutboundMsg> Strategy::_submitOrder(Side side, PriceL price, Qty size) {
     std::cout << "Order Submitted: " << (side == Side::BUY ? "BUY" : "SELL") << " " << size << " @ "
               << static_cast<double>(price) * 1e-9 << "(Theo: " << theoreticalValue / double(PRECISION) << ")"
               << std::endl;
@@ -117,7 +117,7 @@ std::optional<OutboundMsg> Strategy::trade([[maybe_unused]] TimeNs time, OrderId
     return std::make_optional<>(OutboundMsg{OutboundMsg::Submit{true, openOrderId, side, price, size}});
 }
 
-[[nodiscard]] std::optional<OutboundMsg> Strategy::submitCancel(OrderId orderId) {
+[[nodiscard]] std::optional<OutboundMsg> Strategy::_submitCancel(OrderId orderId) {
     assert(state == State::WAITING_ACCEPT);
     assert(openOrderId == orderId);
 
