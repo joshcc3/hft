@@ -31,9 +31,9 @@ int main() {
         ++time;
         ++id;
         Qty size = 1;
-        Side side = Side::BUY;
+        constexpr Side side = Side::BUY;
         PriceL price = 98 * PRECISION;
-        book.submit(time, false, id, size, side, price);
+        book.submit<Side::BUY>(time, false, id, size, price);
     }
     {
         ++time;
@@ -41,7 +41,7 @@ int main() {
         Qty size = 1;
         Side side = Side::SELL;
         PriceL price = 102 * PRECISION;
-        book.submit(time, false, id, size, side, price);
+        book.submit<Side::SELL>(time, false, id, size, price);
     }
 
 
@@ -54,14 +54,14 @@ int main() {
 
     for (int i = 0; i < 1'000'000; ++i) {
         ++time;
-        CLOCK(
-            int i = 0;
-            book.submit(time, false, orderId, size, side, price);
-        )
-        CLOCK (
-            int i = 1;
-            book.cancel(time, orderId);
-        )
+//        CLOCK(
+//            int i = 0;
+            book.submit<Side::BUY>(time, false, orderId, size, price);
+//        )
+//        CLOCK (
+//            int i = 1;
+//            book.cancel(time, orderId);
+//        )
 
     }
 

@@ -21,8 +21,6 @@
 #include "mytypedefs.h"
 
 
-
-
 struct Order {
     PriceL priceL;
     Qty size;
@@ -53,11 +51,12 @@ public:
     using const_iterator = OrderMap::const_iterator;
     using iterator = OrderMap::iterator;
 
+    PriceL price;
     OrderMap orders;
     Qty levelSize;
     const Side side;
 
-    explicit L3Vec(OrderMap &&mp, Side side) : orders(mp), levelSize{0}, side{side} {
+    explicit L3Vec(OrderMap &&mp, PriceL price, Side side) : orders(mp), price{price}, levelSize{0}, side{side} {
         assert(side == Side::BUY || side == Side::SELL);
         orders.reserve(10);
         for (const auto &it: orders) {
@@ -147,7 +146,6 @@ public:
         for (; it != orders.end() && remainingQty > 0; ++it) {
             const Qty qtyAtLevel = it->second.size;
             const OrderId orderId = it->second.orderId;
-            const PriceL price = it->second.priceL;
             Qty matchedQty = std::min(qtyAtLevel, remainingQty);
             if (matchedQty < qtyAtLevel) {
                 removeQty(it, remainingQty);
@@ -299,35 +297,31 @@ public:
     }
 
 
+    template<Side side>
     std::vector<InboundMsg>
-    submit(TimeNs t, bool isStrategy, OrderId orderId, Qty size, Side side, // NOLINT(*-no-recursion)
-           PriceL priceL) noexcept { // NOLINT(*-no-recursion)
+    submit(TimeNs t, bool isStrategy, OrderId orderId, Qty size, PriceL priceL) noexcept { // NOLINT(*-no-recursion)
         assert(orderId < STRATEGY_ORDER_ID_START || isStrategy);
         assert(orderIdMap.find(orderId) == orderIdMap.end());
         assert(stateCheck());
         lastUpdateTs = t;
-        SideLevels<L3> &levelsOpp = getOppSideLevels(side);
-        if (!isAggressiveOrder(priceL, levelsOpp, side)) {
+        SideLevels<L3> &levelsOpp = getOppSideLevels<side>();
+        if (!isAggressiveOrder<side>(priceL, levelsOpp)) {
             {
-                auto _s = std::chrono::system_clock::now();
-                int i = 2;
-                insertLevel(t, isStrategy, orderId, side, size, priceL);
-                auto _e = std::chrono::system_clock::now();
-                timeSpent[i] += elapsed(_s, _e);
+                insertLevel<side>(t, isStrategy, orderId, size, priceL);
                 return {InboundMsg{InboundMsg::OrderAccepted{orderId}}};
 
             };
 
         } else {
-            auto [remainingSize, trades] = match(t, levelsOpp, side, size, priceL);
+            auto [remainingSize, trades] = match<side>(t, levelsOpp, size, priceL);
             trades.emplace_back(InboundMsg{InboundMsg::Trade{orderId, priceL, size - remainingSize}});
             if (remainingSize > 0) {
-                assert(!isAggressiveOrder(priceL, levelsOpp, side));
-                const auto &ts = submit(t, isStrategy, orderId, remainingSize, side, priceL);
+                assert(!isAggressiveOrder<side>(priceL, levelsOpp));
+                const auto &ts = submit<side>(t, isStrategy, orderId, remainingSize, priceL);
                 assert(ts.size() == 1);
                 trades.push_back(ts[0]);
             }
-            return move(trades);
+            return std::move(trades);
         }
     }
 
@@ -383,8 +377,9 @@ public:
     }
 
 
-    [[nodiscard]] Qty getLevelSize(Side side, int level) const {
-        const SideLevels<L3> &levels = getSideLevels(side);
+    template<Side side>
+    [[nodiscard]] Qty getLevelSize(int level) const {
+        const SideLevels<L3> &levels = getSideLevels<side>();
         auto iter = findLevel(levels, level);
 
         if (iter == levels.end()) {
@@ -401,28 +396,32 @@ public:
 private:
     static PriceL getPriceL(const L3 &bids) noexcept {
         assert(!bids.empty());
-        return bids.begin()->second.priceL;
+        return bids.price;
     }
 
-    static bool isAggressiveOrder(PriceL price, SideLevels<L3> &levels, Side side) noexcept {
+    template<Side side>
+    static bool isAggressiveOrder(PriceL price, SideLevels<L3> &levels) noexcept {
         assert(side == Side::BUY || side == Side::SELL);
         int dir = side == Side::BUY ? 1 : -1;
         return !levels.empty() && (getPriceL(*levels.begin()) - price) * dir <= 0;
     }
 
-    static bool isBid(Side side) noexcept {
+
+    template<Side side>
+    constexpr static bool isBid() noexcept {
         assert(side == Side::BUY || side == Side::SELL);
         return side == Side::BUY;
     }
 
-    void insertLevel(TimeNs timeNs, bool isStrategy, OrderId orderId, Side side, Qty size, PriceL priceL) noexcept {
+    template<Side side>
+    void insertLevel(TimeNs timeNs, bool isStrategy, OrderId orderId, Qty size, PriceL priceL) noexcept {
 
-        SideLevels<L3> &levels = getSideLevels(side);
+        SideLevels<L3> &levels = getSideLevels<side>();
 
         assert(size >= 0 && priceL >= 0);
 
-        auto compare = [side](PriceL a, PriceL b) {
-            if (side == Side::BUY) {
+        auto compare = [](PriceL a, PriceL b) {
+            if constexpr (side == Side::BUY) {
                 return a > b;
             } else {
                 return a < b;
@@ -434,8 +433,9 @@ private:
             if (compare(priceL, curPrice)) {
 
                 auto insertPos = levels.emplace(iter,
-                                                L3{{{orderId, Order{timeNs, isStrategy, orderId, side, size, priceL}}},
-                                                   side});
+                                                L3{{{orderId,
+                                                     Order{timeNs, isStrategy, orderId, side, size, priceL}}},
+                                                   priceL, side});
 //                auto res = insertPos->find(orderId);
                 orderIdMap.emplace(orderId, OrderIdLoc<L3>{orderId, side, insertPos});
                 return;
@@ -452,23 +452,26 @@ private:
                                                                                        Order{timeNs, isStrategy,
                                                                                              orderId, side, size,
                                                                                              priceL}}},
+                                                                                     priceL,
                                                                                      side});
 //        const auto &res = insertPos->find(orderId);
         orderIdMap.emplace(orderId, OrderIdLoc<L3>{orderId, side, insertPos});
 
     }
 
-    static bool isAggPrice(Side side, PriceL priceL, PriceL restingPrice) noexcept {
-        if (isBid(side)) {
+    template<Side side>
+    static bool __attribute__((always_inline)) isAggPrice(PriceL priceL, PriceL restingPrice) noexcept {
+        if constexpr (isBid<side>()) {
             return priceL >= restingPrice;
         } else {
             return priceL <= restingPrice;
         }
     }
 
+    template<Side side>
     std::pair<Qty, std::vector<InboundMsg>>
-    match(TimeNs t, SideLevels<L3> &oppLevels, Side side, Qty size, PriceL priceL) noexcept {
-        assert(isAggressiveOrder(priceL, oppLevels, side));
+    match(TimeNs t, SideLevels<L3> &oppLevels, Qty size, PriceL priceL) noexcept {
+        assert(isAggressiveOrder<side>(priceL, oppLevels));
         Qty remainingQty = size;
         auto levelIter = oppLevels.begin();
         std::vector<OrderId> orderIDsToDelete;
@@ -476,33 +479,42 @@ private:
 
         std::vector<InboundMsg> trades;
 
-        while (remainingQty > 0 && levelIter != oppLevels.end() && isAggPrice(side, priceL, getPriceL(*levelIter))) {
+        while (remainingQty > 0 && levelIter != oppLevels.end() && isAggPrice<side>(priceL, getPriceL(*levelIter))) {
             remainingQty = levelIter->match(remainingQty, orderIDsToDelete, trades);
             ++levelIter;
         }
         for (auto orderID: orderIDsToDelete) {
-            PriceL ogPrice = orderIdMap.find(orderID)->second.getOrder()->second.priceL;
+            PriceL ogPrice = orderIdMap.find(orderID)->second.l2->price;
             cancel(t, orderID);
-            assert(isAggPrice(side, priceL, ogPrice));
+            assert(isAggPrice<side>(priceL, ogPrice));
         }
 
         assert(levelIter == oppLevels.end() || !levelIter->empty() && remainingQty == 0);
-        assert(remainingQty == 0 || !isAggressiveOrder(priceL, oppLevels, side));
+        assert(remainingQty == 0 || !isAggressiveOrder<side>(priceL, oppLevels));
         return {remainingQty, std::move(trades)};
     }
 
-    const SideLevels<L3> &getSideLevels(Side side) const noexcept {
+    template<Side side>
+    constexpr const SideLevels<L3> &__attribute__((always_inline)) getSideLevels() const noexcept {
         assert(side == Side::BUY || side == Side::SELL);
         return side == Side::BUY ? bidLevels : askLevels;
     }
+
+    template<Side side>
+    constexpr SideLevels<L3> &__attribute__((always_inline)) getSideLevels() noexcept {
+        assert(side == Side::BUY || side == Side::SELL);
+        return side == Side::BUY ? bidLevels : askLevels;
+    }
+
 
     SideLevels<L3> &getSideLevels(Side side) noexcept {
         assert(side == Side::BUY || side == Side::SELL);
         return side == Side::BUY ? bidLevels : askLevels;
     }
 
-    template<bool IsConst = false>
-    auto getOppSideLevels(Side side) noexcept -> std::conditional_t<IsConst, const SideLevels<L3> &, SideLevels<L3> &> {
+    template<Side side, bool IsConst = false>
+    constexpr auto __attribute__((always_inline))
+    getOppSideLevels() noexcept -> std::conditional_t<IsConst, const SideLevels<L3> &, SideLevels<L3> &> {
         assert(side == Side::BUY || side == Side::SELL);
         return side == Side::BUY ? askLevels : bidLevels;
     }
