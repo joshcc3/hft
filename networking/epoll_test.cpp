@@ -12,7 +12,7 @@
 
 #define MAX_EVENTS 10
 
-int set_nonblocking(int sockfd) {
+inline int set_nonblocking(int sockfd) {
     int flags = fcntl(sockfd, F_GETFL);
     if (flags == -1) {
         perror("fcntl");
@@ -25,7 +25,7 @@ int set_nonblocking(int sockfd) {
     return 0;
 }
 
-int main() {
+inline int epoll_test() {
     int server_fd, new_socket;
     struct sockaddr_in address;
     int opt = 1;
@@ -41,7 +41,7 @@ int main() {
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(8888);
+    address.sin_port = htons(8889);
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("bind");
@@ -91,7 +91,7 @@ int main() {
                     close(events[i].data.fd);
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
                 } else {
-                    send(events[i].data.fd, buffer, valread, 0);
+//                    send(events[i].data.fd, buffer, valread, 0);
                 }
             }
         }

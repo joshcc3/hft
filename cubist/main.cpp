@@ -4,7 +4,6 @@
 #include "Backtester.h"
 #include <fstream>
 
-
 int main(int argc, char *argv[]) {
     if (argc != 4) {
         std::cerr << "Usage: [./cubist [exchange-strat-latency] [strategy-exchange-latency] [input-file]]"
