@@ -1,9 +1,8 @@
 #ifndef HFT_L3ORDERBOOK_H
 #define HFT_L3ORDERBOOK_H
 
-#define NDEBUG
+//#define NDEBUG
 
-#include <chrono>
 #include <algorithm>
 #include <cstdint>
 #include <cassert>
@@ -19,6 +18,7 @@
 #include <unordered_set>
 #include <map>
 #include "mytypedefs.h"
+#include "L3LevelAlloc.h"
 
 
 struct Order {
@@ -47,7 +47,8 @@ struct Order {
 class L3Vec {
 
 public:
-    using OrderMap = std::vector<std::pair<OrderId, Order>>;
+    using OrderPair = std::pair<OrderId, Order>;
+    using OrderMap = std::vector<OrderPair>;
     using const_iterator = OrderMap::const_iterator;
     using iterator = OrderMap::iterator;
 
@@ -266,7 +267,7 @@ struct SubmitT {
     union SubmitRes {
 
         const InboundMsg accept;
-        const InboundMsg* msgs;
+        const InboundMsg *msgs;
 
     } res;
 
@@ -276,7 +277,7 @@ struct SubmitT {
     ~SubmitT() {
         if (tag == 1) {
             delete[] res.msgs;
-        } else if(tag == 0) {
+        } else if (tag == 0) {
             res.accept.~InboundMsg();
         } else {
             assert(false);
@@ -285,7 +286,7 @@ struct SubmitT {
 
     explicit SubmitT(InboundMsg accept) : res{.accept = accept}, tag{0}, size{-1} {}
 
-    explicit SubmitT(const InboundMsg* msgs, int size) : res{SubmitRes{.msgs = msgs}}, tag{1}, size{size} {}
+    explicit SubmitT(const InboundMsg *msgs, int size) : res{SubmitRes{.msgs = msgs}}, tag{1}, size{size} {}
 };
 
 template<typename L3>
@@ -344,11 +345,8 @@ public:
         lastUpdateTs = t;
         SideLevels<L3> &levelsOpp = getOppSideLevels<side>();
         if (!isAggressiveOrder<side>(priceL, levelsOpp)) {
-            {
-                insertLevel<side>(t, isStrategy, orderId, size, priceL);
-                return SubmitT{InboundMsg{InboundMsg::OrderAccepted{orderId}}};
-            };
-
+            insertLevel<side>(t, isStrategy, orderId, size, priceL);
+            return SubmitT{InboundMsg{InboundMsg::OrderAccepted{orderId}}};
         } else {
             auto [remainingSize, trades] = match<side>(t, levelsOpp, size, priceL);
             trades.emplace_back(InboundMsg{InboundMsg::Trade{orderId, priceL, size - remainingSize}});
@@ -358,14 +356,14 @@ public:
                 trades.emplace_back(InboundMsg{InboundMsg::OrderAccepted{orderId}});
             }
             int tradesSize = trades.size();
-            InboundMsg* tradesPtr = static_cast<InboundMsg*>(malloc(sizeof(InboundMsg) * tradesSize));
+            InboundMsg *tradesPtr = static_cast<InboundMsg *>(malloc(sizeof(InboundMsg) * tradesSize));
             std::copy(trades.begin(), trades.end(), tradesPtr);
             return SubmitT{tradesPtr, tradesSize};
         }
     }
 
     InboundMsg modify(TimeNs t, OrderId oldOrderId, Qty newSize) {
-        stateCheck();
+        assert(stateCheck());
         lastUpdateTs = t;
 
         const auto &existingIter = orderIdMap.find(oldOrderId);
@@ -394,16 +392,19 @@ public:
     }
 
     InboundMsg cancel(TimeNs t, OrderId orderId) {
-        stateCheck();
+        assert(stateCheck());
         lastUpdateTs = t;
+
         const auto &elem = orderIdMap.find(orderId);
         if (elem != orderIdMap.end()) {
+
             assert(elem != orderIdMap.end());
             const auto &[id, loc] = *elem;
 
             auto &l2 = loc.l2;
             auto iter = loc.getOrder();
             const Order &deletedOrder = iter->second;
+
             l2->erase(iter);
             if (l2->empty()) {
                 getSideLevels(elem->second.side).erase(l2);
@@ -475,8 +476,9 @@ private:
             if (compare(priceL, curPrice)) {
 
                 auto insertPos = levels.emplace(iter,
-                                                L3{{{orderId,
-                                                     Order{timeNs, isStrategy, orderId, side, size, priceL}}},
+                                                L3{typename L3::OrderMap{{orderId,
+                                                                          Order{timeNs, isStrategy, orderId, side, size,
+                                                                                priceL}}},
                                                    priceL, side});
 //                auto res = insertPos->find(orderId);
                 orderIdMap.emplace(orderId, OrderIdLoc<L3>{orderId, side, insertPos});
@@ -490,10 +492,10 @@ private:
 
         assert(orderIdMap.find(orderId) == orderIdMap.end());
         assert(iter == levels.end());
-        const typename SideLevels<L3>::iterator &insertPos = levels.emplace(iter, L3{{{orderId,
-                                                                                       Order{timeNs, isStrategy,
-                                                                                             orderId, side, size,
-                                                                                             priceL}}},
+        const typename SideLevels<L3>::iterator &insertPos = levels.emplace(iter,
+                                                                            L3{typename L3::OrderMap {
+                                                                                        {orderId,
+                                                                                        Order{timeNs, isStrategy, orderId, side, size, priceL}}},
                                                                                      priceL,
                                                                                      side});
 //        const auto &res = insertPos->find(orderId);
@@ -550,7 +552,7 @@ private:
     }
 
 
-    SideLevels<L3> &getSideLevels(Side side) noexcept {
+    SideLevels<L3> & __attribute__((always_inline)) getSideLevels(Side side) noexcept {
         assert(side == Side::BUY || side == Side::SELL);
         return side == Side::BUY ? bidLevels : askLevels;
     }

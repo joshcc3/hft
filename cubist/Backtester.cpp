@@ -71,10 +71,10 @@ Backtester::_processInbound(TimeNs timeNs, const InboundMsg::Noop &update) {
     } else if(output.tag == 1) {
         assert(output.size > 1 && output.res.msgs != nullptr && std::holds_alternative<InboundMsg::Trade>(output.res.msgs->content));
         std::vector<InboundMsg> v(output.res.msgs, output.res.msgs + output.size);
-        assert(all_of(output.begin(), output.end() - 1,
+        assert(all_of(v.begin(), v.end() - 1,
                       [](const InboundMsg &msg) { return std::holds_alternative<InboundMsg::Trade>(msg.content); })
-               && (std::holds_alternative<InboundMsg::OrderAccepted>((output.end() - 1)->content)
-                   || std::holds_alternative<InboundMsg::Trade>((output.end() - 1)->content)));
+               && (std::holds_alternative<InboundMsg::OrderAccepted>((v.end() - 1)->content)
+                   || std::holds_alternative<InboundMsg::Trade>((v.end() - 1)->content)));
         return v;
     }
 }
