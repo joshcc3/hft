@@ -85,13 +85,13 @@ private:
         // 1585699200245000
         int ix = startIx;
         u64 _timestamp = 0;
-        for(int i = 0; i < 16; ++i) {
+        for (int i = 0; i < 16; ++i) {
             _timestamp = _timestamp * 10 + (msg[++ix] - '0');
         }
 //        assert(_timestamp == timestamp);
         ++ix;
         u64 _localtimestamp = 0;
-        for(int i = 0; i < 16; ++i) {
+        for (int i = 0; i < 16; ++i) {
             _localtimestamp = _localtimestamp * 10 + (msg[++ix] - '0');
         }
 //        assert(_localtimestamp == localTimestamp);
