@@ -2,7 +2,7 @@
 // Created by jc on 28/10/23.
 //
 
-#define NDEBUG
+//#define NDEBUG
 
 #include <cstdint>
 #include <vector>

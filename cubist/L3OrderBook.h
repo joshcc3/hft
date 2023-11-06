@@ -1,7 +1,7 @@
 #ifndef HFT_L3ORDERBOOK_H
 #define HFT_L3ORDERBOOK_H
 
-#define NDEBUG
+//#define NDEBUG
 
 #include <algorithm>
 #include <cstdint>

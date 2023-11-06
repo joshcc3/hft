@@ -2,22 +2,23 @@ cmake_minimum_required(VERSION 3.26)
 project(cubist)
 project(obtester)
 project(tictactoe)
-project(lll_client)
+project(lll_strategy)
 project(lll_exchange)
 set(CMAKE_CXX_STANDARD 17)
 
 find_package(Boost 1.78.0 COMPONENTS iostreams REQUIRED)
 
 add_executable(lll_exchange
-        lowlatencylab/exchmcserver.cpp
-        lowlatencylab/exchmcserver.h)
+        lowlatencylab/server/exchmcserver.cpp
+        lowlatencylab/server/exchmcserver.h)
 
-add_executable(lll_client
-        lowlatencylab/mdmcclient.cpp
-        lowlatencylab/mdmcclient.h
-        lowlatencylab/L2OB.cpp
-        lowlatencylab/L2OB.h
+add_executable(lll_strategy
+        lowlatencylab/client/mdmcclient.cpp
+        lowlatencylab/client/mdmcclient.h
+        lowlatencylab/client/L2OB.cpp
+        lowlatencylab/client/L2OB.h
         lowlatencylab/defs.h
+        lowlatencylab/client/Strat.h
 )
 
 add_executable(cubist
@@ -53,10 +54,7 @@ add_executable(obtester
         cubist/L3LevelAlloc.cpp
 )
 
-add_executable(tictactoe
-        networking/tictactoegames.cpp
-)
-
 target_link_libraries(networking uring)
 target_link_libraries(cubist Boost::iostreams)
 target_link_libraries(lll_exchange Boost::iostreams uring)
+target_link_libraries(lll_strategy uring)

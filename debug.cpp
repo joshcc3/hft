@@ -12,183 +12,25 @@
 #include <chrono>
 #include <cassert>
 #include <deque>
+#include <x86intrin.h>
+#include <bitset>
 
 using namespace std;
 
-int scorePos(string board[3], int i, int j) {
-
-    if (board[i][j] != '.') {
-        return -30;
-    }
-
-    int rowCount = 0;
-    int colCount = 0;
-    int diagCount1 = 0;
-    int diagCount2 = 0;
-    for (int x = 0; x < 3; x++) {
-        rowCount += (board[i][x] == 'X') - (board[i][x] == 'O');
-        colCount += (board[x][j] == 'X') - (board[x][j] == 'O');
-        diagCount1 += (board[x][x] == 'X') - (board[x][x] == 'O');
-        diagCount2 += (board[2 - x][x] == 'X') - (board[2 - x][x] == 'O');
-    }
-
-    diagCount1 = i == j ? diagCount1 : 0;
-    diagCount2 = i + j == 2 ? diagCount2 : 0;
-
-    if (max((rowCount), max((colCount), max((diagCount1), (diagCount2)))) == 2) {
-        return 30;
-
-    } else if (max(abs(rowCount), max(abs(colCount), max(abs(diagCount1), abs(diagCount2)))) == 2) {
-        return 29;
-    } else {
-        int score = rowCount + colCount + diagCount1 + diagCount2;
-        return 2*abs(score) - (score < 0);
-    }
-
-}
-
-void solveTicTacToe(string board[3]) {
-    int score = -30;
-    pair<int, int> result;
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            int s = scorePos(board, i, j);
-            if (s > score) {
-                result.first = i;
-                result.second = j;
-                score = s;
-            }
-        }
-    }
-
-    cout << result.first << " " << result.second << endl;
-}
+// tODO - always_destroy
 
 using u64 = uint64_t;
+using u32 = uint32_t;
 
-
-struct Position {
-    int x;
-    int y;
-};
-
-struct State {
-    const vector<Position> positions = {Position{0, 0}, Position{0, 0}, Position{0, 0}, Position{0, 0}, Position{0, 0}, Position{0, 0}, Position{0, 0}};
-    constexpr static int DOT = 0;
-    constexpr static int X = 1;
-    constexpr static int O = 2;
-    u64 internalState;
-
-    bool isOpen(const Position& p) {
-        return getPos(p) == DOT;
-    }
-
-    void place(const Position& p) {
-        u64 mask = 0;
-        u64 placed = 0;
-        assert(false);
-        internalState = (internalState & mask) | placed;
-    }
-
-    void revert(const Position& p) {
-        u64 mask = 0;
-        u64 placed = 0;
-        assert(false);
-        internalState = (internalState & mask) | placed;
-
-    }
-
-private:
-    u64 getPos(const Position& p) {
-        u64 res = (internalState >> ((p.x * 3 + p.y)*2)) & 3;
-        assert(res >= DOT && res <= O);
-        return res;
-    }
-
-};
-
-struct StateHash
-{
-    std::size_t operator()(const State& s) const noexcept
-    {
-        return s.internalState;
-    }
-};
-
-
-bool operator==(const State& s1, const State& s2) {
-    return s1.internalState == s2.internalState;
+template<typename T>
+void p() {
+    cout << typeid(T).name() << endl;
 }
-
-class Cache {
-    unordered_map<State, int, StateHash> mp;
-};
-
-
-int calculateOutcome(State& state, Cache& cache) {
-    const auto& iter = cache.find(state);
-    if(iter != cache.end()) {
-        return iter->second;
-    }
-    for(const Position& p : state.positions) {
-        if(state.isOpen(p)) {
-            State prev = state;
-            state.place(p);
-            int outcome = calculateOutcome(state, cache);
-            assert(cache.find(state) != cache.end());
-            state.revert(p);
-            assert(state == prev);
-            if(outcome == 2) {
-                cache.emplace(state, 0);
-                return 0;
-            } else if(outcome == 0) {
-                cache.emplace(state, 2);
-                return 2;
-            }
-        }
-    }
-
-    cache.emplace(state, 1);
-    return 1;
-}
-
-void solveTicTacToeFR(string board[3]) {
-    State state = getState(board);
-    vector<Position> openPositions = getOpenPositions();
-    Position winner;
-    Cache cache;
-    pair<Position, int> curBest{{}, -1};
-    for(const Position& pos : openPositions) {
-        state.place(1, pos);
-        State prevState = state;
-        int prevCacheSize = cache.size();
-        int outcome = calculateOutcome(state, cache);
-        assert(outcome >= 0 && outcome <= 2);
-        assert(prevState == state);
-        assert(prevCacheSize + 1 <= cache.size());
-        assert(cache.find(state) != cache.end());
-        if(outcome == 2) {
-            cout << "You win: " << pos << endl;
-            return;
-        }
-        if(outcome > curBest.second) {
-            curBest.first = pos;
-            curBest.second = outcome;
-        }
-    }
-    if(curBest.second == 1) {
-        cout << "Most likely Draw: " << curBest.first << endl;
-    } else {
-        cout << "You lose: " << curBest.first << endl;
-    }
-}
-
 
 int main() {
-    string board[3] = {"XOX",
-                       ".OX",
-                       "O.."};
-    solveTicTacToe(board);
+    vector<int> a{1,2,3};
+    int p = 4;
+    cout << *a.rbegin() << endl;
 }
 
 
