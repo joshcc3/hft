@@ -9,6 +9,28 @@
 #include <unordered_set>
 #include "defs.h"
 
+struct TopLevel {
+    PriceL bestBid = 0;
+    PriceL bestAsk = 0;
+    Qty bidSize = -1;
+    Qty askSize = -1;
+
+    TopLevel() = default;
+
+    void set(PriceL _bestBid, PriceL _bestAsk, Qty _bidSize, Qty _askSize) {
+        bestBid = _bestBid;
+        bestAsk = _bestAsk;
+        bidSize = _bidSize;
+        askSize = _askSize;
+        assert(bidSize > 0);
+        assert(askSize > 0);
+        assert(bestBid > 0);
+        assert(bestAsk > bestBid);
+        assert((bestAsk - bestBid) / double(bestBid) < 0.1);
+    }
+
+};
+
 struct LevelInfo {
 
     TimeNs lastUpdated;
@@ -40,22 +62,34 @@ public:
         ask.reserve(1 << 8);
     }
 
-    void update(Side side, TimeNs timestamp, TimeNs localTimestamp, PriceL price, Qty qty) {
+    void clear() {
+        size_t oldCap = bid.capacity();
+        size_t askCap = ask.capacity();
+        bid.clear();
+        ask.clear();
+        seen.clear();
+        assert(bid.capacity() == oldCap);
+        assert(ask.capacity() == askCap);
+    }
+
+    TopLevel
+    update(Side side, TimeNs localTimestamp, PriceL price, Qty qty) {
         assert(qty > 0);
         assert(price > PRECISION_L);
-        assert(timestamp > 0);
+        assert(localTimestamp > 0);
 
         if (side == Side::BUY) {
-            update < Side::BUY > (bid, ask, timestamp, localTimestamp, price, qty);
+            return update < Side::BUY > (bid, ask, localTimestamp, price, qty);
         } else if (side == Side::SELL) {
-            update < Side::SELL > (ask, bid, timestamp, localTimestamp, price, qty);
+            return update < Side::SELL > (ask, bid, localTimestamp, price, qty);
         } else {
             assert(false);
         }
     }
 
     template<Side side>
-    void update(SideLevel &level, SideLevel &oppLevel, TimeNs timestamp, TimeNs localTimestamp, PriceL price, Qty qty) {
+    TopLevel
+    update(SideLevel &level, SideLevel &oppLevel, TimeNs localTimestamp, PriceL price, Qty qty) {
         assert(oppLevel.empty() || price >= oppLevel[0].price);
         auto sideComp = [price](const LevelInfo &l) {
             if constexpr (side == Side::BUY) {
@@ -64,11 +98,21 @@ public:
                 return price <= l.price;
             }
         };
+
+        TopLevel topLevel;
+        if (!bid.empty() && !ask.empty()) {
+            topLevel.set(bid.back().price, ask.back().price, bid.back().levelQty, ask.back().levelQty);
+        }
+
         auto iter = std::find_if(level.rbegin(), level.rend(), sideComp);
         assert(iter == level.rend() || iter->price >= price && iter->lastUpdated < localTimestamp);
         assert(iter != level.rend() || !level.empty() ||
                (iter - 1)->price < price && iter->lastUpdated < localTimestamp);
 
+        if (iter != level.rbegin()) {
+            topLevel.bidSize = -1;
+            topLevel.askSize = -1;
+        }
 
         if (iter->price == price) {
             assert(seen.find(price) != seen.end());
@@ -86,6 +130,8 @@ public:
         assert(it == (level.end() - 1) || !sideComp(*(it + 1)));
 
         assert(stateChecks());
+
+        return topLevel;
     }
 
 
@@ -100,7 +146,8 @@ public:
         assert(t > 0);
         assert(side == Side::BUY || side == Side::SELL);
         SideLevel level = side == Side::BUY ? bid : ask;
-        auto it = std::find_if(level.rbegin(), level.rend(), [priceL](const LevelInfo& l) {return l.price == priceL;});
+        auto it = std::find_if(level.rbegin(), level.rend(),
+                               [priceL](const LevelInfo &l) { return l.price == priceL; });
         assert(it != level.rend());
         assert(seen.find(priceL) != seen.end());
         assert((it.base() - 1)->price == priceL);
@@ -121,18 +168,20 @@ public:
     bool stateChecks() {
         assert(bid.size() + ask.size() == seen.size());
         auto it = bid.begin();
-        while((it + 1) != bid.end()) {
-            assert(it->price < (it+1)->price);
+        while ((it + 1) != bid.end()) {
+            assert(it->price < (it + 1)->price);
         }
         it = ask.begin();
-        while((it + 1) != ask.end()) {
-            assert(it->price > (it+1)->price);
+        while ((it + 1) != ask.end()) {
+            assert(it->price > (it + 1)->price);
         }
         assert((bid.end() - 1)->price < (ask.end() - 1)->price);
 
         std::unordered_set<PriceL> other;
-        std::transform(bid.begin(), bid.end(), std::inserter(other, other.begin()), [](const LevelInfo& l) { return l.price; });
-        std::transform(ask.begin(), ask.end(), std::inserter(other, other.begin()), [](const LevelInfo& l) { return l.price; });
+        std::transform(bid.begin(), bid.end(), std::inserter(other, other.begin()),
+                       [](const LevelInfo &l) { return l.price; });
+        std::transform(ask.begin(), ask.end(), std::inserter(other, other.begin()),
+                       [](const LevelInfo &l) { return l.price; });
         assert(other == seen);
 
     }

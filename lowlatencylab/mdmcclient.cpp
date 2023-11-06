@@ -14,6 +14,18 @@
 #include <x86intrin.h>
 #include <memory>
 #include <bitset>
+#include <cstddef>
+#include <vector>
+#include <cassert>
+#include <memory>
+#include <new>
+#include <sched.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+
+#define _GNU_SOURCE
 
 enum class StrategyState {
     INIT,
@@ -22,11 +34,13 @@ enum class StrategyState {
     RUNNING
 };
 
-constexpr static int PINNED_CPU = 1;
+constexpr static int PINNED_CPU = 0;
 
 class OE {
 public:
     // TODO Use POLLHUP to determine when the other end has hung up
+
+    constexpr static u64 ORDER_TAG = 3;
 
     IOUringState &ioState;
     int clientFD = -1;
@@ -38,7 +52,17 @@ public:
     char outputBuf[msgSize];
     Order curOrder;
 
-    OE(IOUringState &ioState) : ioState{ioState} {}
+    explicit OE(IOUringState &ioState) : ioState{ioState} {}
+
+    ~OE() {
+        if (clientFD != -1) {
+            if (close(clientFD) == -1) {
+                perror("Failed to close OE socket");
+            }
+            clientFD = -1;
+
+        }
+    }
 
     void establishConnection() {
         assert(clientFD == -1);
@@ -110,7 +134,7 @@ public:
 
     }
 
-    void submit(MDMsgId triggerEvent, TimeNs triggerRecvTime, PriceL price, Qty qty) {
+    void submit(MDMsgId triggerEvent, TimeNs triggerRecvTime, PriceL price, Qty qty, OrderFlags flags) {
 /*
     TODO - setup queue polling to avoid the system call for the kernel to automatically
     pick up submits.
@@ -130,6 +154,7 @@ public:
         o.id = orderId++;
         o.price = price;
         o.qty = qty;
+        o.flags = flags;
 
         assert(o.submittedTime == submitTime);
         assert(o.triggerEvent == triggerEvent);
@@ -138,9 +163,9 @@ public:
         assert(o.price == price);
         assert(o.qty == qty);
 
-        io_uring_sqe *submitSqe = ioState.getSqe(o.id);
-        int flags = MSG_DONTROUTE | MSG_DONTWAIT;
-        io_uring_prep_send(submitSqe, clientFD, static_cast<void *>(outputBuf), msgSize, flags);
+        io_uring_sqe *submitSqe = ioState.getSqe(o.id + ORDER_TAG);
+        int sendFlags = MSG_DONTROUTE | MSG_DONTWAIT;
+        io_uring_prep_send(submitSqe, clientFD, static_cast<void *>(outputBuf), msgSize, sendFlags);
         assert(submitSqe->flags == 0);
 
         int submits = io_uring_submit(&ioState.ring);
@@ -166,38 +191,71 @@ public:
             return false;
         }
     }
-};
 
+    void completeMessage(io_uring_cqe &completion) {
+        auto curTime = currentTimeNs();
+
+        assert(io_uring_cq_ready(&ioState.ring) >= 1);
+        assert(ioState.ring.cq.cqes == &completion);
+        assert(clientFD > 2);
+        assert(orderId > 1);
+        assert(curOrder.id >= 1);
+
+        i32 cRes = completion.res;
+        u32 cFlags = completion.flags;
+        u64 cUserData = io_uring_cqe_get_data64(&completion);
+
+        OrderId receivedId = cUserData - ORDER_TAG;
+
+        assert(receivedId == curOrder.id);
+        assert(cRes > 0);
+        assert(!(cFlags & IORING_CQE_F_BUFFER));
+        assert(!(cFlags & IORING_CQE_F_NOTIF));
+        assert(cRes > 0 || -cRes != EBADF);
+
+        cout << "Order Id [" << curOrder.id << "]." << endl;
+        cout << "Order Latency Time [" << curTime - curOrder.triggerReceivedTime << "]." << endl;
+        cout << "Order Ack Time [" << curTime - curOrder.submittedTime << "]." << endl;
+
+    }
+};
 
 struct UDPBuffer {
     constexpr static int Sz = 32;
     static_assert(__builtin_popcount(Sz) == 1);
     static_assert(Sz == 32);
 
-    using BufferItem = std::pair<int, std::string>;
+    using BufferItem = const MDPacket;
     u32 mask = 0;
-    int lowestSeqNum = 0;
-    int head = 0;
+    SeqNo lowestSeqNum = 0;
+    u32 head = 0;
     std::array<BufferItem, Sz> ringBuffer{};
 
-    bool test(int pos) const {
+    const MDPacket &get(int i) {
+        assert(i >= 0 && i < Sz);
+        u32 bufferIx = (head + i) & (Sz - 1);
+        assert(mask >> bufferIx);
+        return ringBuffer[bufferIx];
+    }
+
+    [[nodiscard]] bool test(int pos) const {
         assert(pos < Sz && pos >= 0);
         return mask >> (1 << ((head + pos) & (Sz - 1)));
     }
 
-    int newMessage(int seqNo, std::string &msg) {
+    int newMessage(SeqNo seqNo, const MDPacket &msg) {
         assert(head < Sz);
         assert(lowestSeqNum >= 0);
         assert((mask & u32(-1)) != u32(-1));
         assert(seqNo >= lowestSeqNum);
-        int bufferOffs = seqNo - lowestSeqNum;
+        u32 bufferOffs = seqNo - lowestSeqNum;
         assert(bufferOffs < Sz);
-        int bufferPos = (head + bufferOffs) & (Sz - 1);
+        u32 bufferPos = (head + bufferOffs) & (Sz - 1);
         int maskBit = 1 << bufferPos;
         assert((mask & maskBit) == 0);
         for (int i = 0; i < Sz; ++i) {
             if (test(i)) {
-                assert(ringBuffer[i].first != -1);
+                assert(ringBuffer[i].seqNo != -1);
             }
         }
         mask |= maskBit;
@@ -205,11 +263,14 @@ struct UDPBuffer {
         assert(_rotr(alignedMask, head) == mask);
         u32 fullMask = ((u64(1) << (bufferOffs + 1)) - 1) << (Sz - bufferOffs - 1);
         bool isFull = (fullMask & alignedMask) == fullMask;
-        new(&ringBuffer[bufferPos]) BufferItem(seqNo, std::move(msg));
+        new(&ringBuffer[bufferPos]) BufferItem{msg};
+        assert(ringBuffer[bufferPos].seqNo == msg.seqNo);
+        assert(ringBuffer[bufferPos].price == msg.price);
+        assert(ringBuffer[bufferPos].localTimestamp == msg.localTimestamp);
         return isFull ? bufferOffs + 1 : 0;
     }
 
-    void complete(int n) {
+    void advance(int n) {
         u32 alignedMask = _rotl(mask, head);
         assert(_rotr(alignedMask, head) == mask);
         u32 fullMask = ((u64(1) << n) - 1) << (Sz - n);
@@ -224,11 +285,13 @@ public:
     constexpr static int BUFFER_TAG = 0;
     constexpr static int RECV_TAG = 1;
 
+    L2OB &ob;
     OE &orderEntry;
     IOUringState &ioState;
     TimeNs lastReceivedNs = -1;
     int mdFD = -1;
-    int cursor = 0;
+    bool isComplete = false;
+    SeqNo cursor = 0;
     UDPBuffer udpBuf{};
 
     static constexpr int BUFFER_SIZE = 1 << 12;
@@ -238,10 +301,11 @@ public:
     std::bitset<NUM_BUFFERS> used;
     bool multishotDone = true;
 
-    Strat(IOUringState &ioState, OE &oe) : ioState{ioState},
-                                        orderEntry{oe},
-                                        buffers{std::make_unique<u8[]>(BUFFER_SIZE * NUM_BUFFERS)},
-                                        used{} {
+    Strat(IOUringState &ioState, OE &oe, L2OB &ob) : ioState{ioState},
+                                                     orderEntry{oe},
+                                                     buffers{std::make_unique<u8[]>(BUFFER_SIZE * NUM_BUFFERS)},
+                                                     used{},
+                                                     ob{ob} {
 
         mdFD = socket(AF_INET, SOCK_DGRAM, 0);
         if (mdFD < 0) {
@@ -285,13 +349,135 @@ public:
 
     }
 
+    ~Strat() {
+        if (mdFD != -1) {
+            if (close(mdFD) == -1) {
+                perror("Failed to locse md");
+            }
+            mdFD = -1;
+        }
+    }
+
+    template<Side side>
+    void __attribute__((always_inline))
+    checkTrade(SeqNo seqNo, TimeNs mdTime, bool isSnapshot, TimeNs localTimestamp,
+               PriceL price,
+               Qty qty) {
+        const auto &[bestBid, bestAsk, bidSize, askSize] = ob.update<side>(ob.bid, ob.ask,
+                                                                           localTimestamp, price, qty);
+
+        if (!isSnapshot) {
+            SeqNo triggerEvent = seqNo;
+            TimeNs recvTime = mdTime;
+            Qty tradeQty = 1;
+
+            PriceL sidePrice;
+            PriceL oppSidePrice;
+            Qty sideQty;
+            constexpr bool isBid = side == Side::BUY;
+
+            if constexpr (side == Side::BUY) {
+                sidePrice = bestBid;
+                sideQty = bidSize;
+                oppSidePrice = bestAsk;
+            } else if constexpr (side == Side::SELL) {
+                sidePrice = bestAsk;
+                sideQty = askSize;
+                oppSidePrice = bestBid;
+            } else {
+                static_assert(false);
+            }
+
+            PriceL notionalChange = price * qty - sidePrice * sideQty;
+
+            if (bidSize != -1 && askSize != -1) {
+                if (notionalChange > TRADE_THRESHOLD) {
+                    PriceL tradePrice = oppSidePrice;
+                    OrderFlags flags{.isBid = !isBid};
+                    orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
+                } else if (notionalChange < -TRADE_THRESHOLD) {
+                    PriceL tradePrice = sidePrice;
+                    OrderFlags flags{.isBid = isBid};
+                    orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
+                }
+            }
+        }
+    }
+
     u8 *handleMessages(u8 *inBuf, u64 numPackets, TimeNs time) {
-        throw std::runtime_error("Not implemented");
-        return nullptr;
+        assert(isComplete);
+        assert(inBuf != nullptr);
+        assert(numPackets > 0);
+        assert(time > 0);
+        assert(time > lastReceivedNs);
+        assert(mdFD != -1);
+
+        u32 ogMask = udpBuf.mask;
+        u32 ogLowestSeqNum = udpBuf.lowestSeqNum;
+        u32 ogHead = udpBuf.head;
+        bool ogMultishotDone = multishotDone;
+        std::bitset<NUM_BUFFERS> ogUsed{used};
+
+        u8 *finalBufPos = inBuf;
+
+        for (int i = 0; i < numPackets; ++i) {
+
+            MDPacket &packet = *reinterpret_cast<MDPacket *>(finalBufPos);
+            int ready = udpBuf.newMessage(packet.seqNo, packet);
+            for (int j = 0; j < ready; ++j) {
+                assert(!isComplete);
+
+                const MDPacket &p = udpBuf.get(i);
+                isComplete = p.flags.isTerm;
+                if (!isComplete) {
+                    assert(p.seqNo > -1);
+                    assert(p.localTimestamp > lastReceivedNs);
+                    assert(p.price > 0);
+                    assert(p.qty >= 0);
+
+                    SeqNo seqNo = p.seqNo;
+                    TimeNs timestamp = p.localTimestamp;
+                    TimeNs localTimestamp = timestamp;
+                    PriceL price = p.price;
+                    Qty qty = p.qty;
+                    bool isSnapshot = p.flags.isSnapshot;
+
+                    if (qty > 0) {
+                        static bool isSnapshotting = false;
+                        if(!isSnapshotting && isSnapshot) {
+                            ob.clear();
+                        }
+                        isSnapshotting = isSnapshot;
+                        if (p.flags.isBid) {
+                            checkTrade<Side::BUY>(seqNo, time, isSnapshot, localTimestamp, price, qty);
+                        } else {
+                            checkTrade<Side::SELL>(seqNo, time, isSnapshot, localTimestamp, price, qty);
+                        }
+                    } else {
+                        ob.cancel(localTimestamp, price, p.flags.isBid ? Side::BUY : Side::SELL);
+                    }
+
+                    cursor = p.seqNo;
+                    lastReceivedNs = p.localTimestamp;
+                }
+            }
+            udpBuf.advance(ready);
+            finalBufPos += sizeof(MDPacket);
+        }
+
+        assert(udpBuf.mask != ogMask);
+        assert(udpBuf.lowestSeqNum >= ogLowestSeqNum);
+        assert(udpBuf.lowestSeqNum == ogLowestSeqNum || udpBuf.head != ogHead);
+        assert(multishotDone == ogMultishotDone);
+        assert(ogUsed == used);
+        assert(finalBufPos - inBuf == numPackets * sizeof(MDPacket));
+
+        return finalBufPos;
+
     }
 
 
-    void completeMessages(io_uring_cqe &completion) {
+    void completeMessage(io_uring_cqe &completion) {
         auto curTime = currentTimeNs();
 
         assert(io_uring_cq_ready(&ioState.ring) >= 1);
@@ -315,11 +501,11 @@ public:
 
         bool isAlive = isConnected();
 
-        assert(cRes > 0 || cRes != EBADF);
+        assert(cRes > 0 || -cRes != EBADF);
         assert(completion.flags & IORING_CQE_F_BUFFER);
         assert(!multishotDone || ((completion.flags & IORING_CQE_F_MORE) == 0));
         multishotDone = multishotDone || ((completion.flags & IORING_CQE_F_MORE) == 0);
-        assert(isAlive == !(cRes > 0 || cRes == EBADF));
+        assert(isAlive == !(cRes > 0 || -cRes == EBADF));
 
         if (isAlive) {
             u32 bufferIx = completion.flags >> (sizeof(completion.flags) * 8 - 16);
@@ -328,8 +514,8 @@ public:
 
             u8 *buf = buffers.get() + bufferIx * BUFFER_SIZE;
             int bytesRead = cRes;
-            u64 numPackets = cRes / sizeof(MDPacket);
-            assert(cRes % sizeof(MDPacket) == 0);
+            u64 numPackets = bytesRead / sizeof(MDPacket);
+            assert(bytesRead % sizeof(MDPacket) == 0);
 
 
             u8 *endBuf = handleMessages(buf, numPackets, curTime);
@@ -356,7 +542,6 @@ public:
 
 
     void prepareRecv() {
-
         assert(used.all() || !used.any());
         used.reset();
 
@@ -388,7 +573,7 @@ public:
     [[nodiscard]] bool isConnected() const noexcept {
         TimeNs now = currentTimeNs();
         bool notDelayed = std::abs(now - lastReceivedNs) < 1000000;
-        return mdFD != -1 && notDelayed;
+        return !isComplete && mdFD != -1 && notDelayed;
     }
 };
 
@@ -397,27 +582,72 @@ class Driver {
     StrategyState state = StrategyState::INIT;
 
     IOUringState ioState{};
-    L2OB ob{};
 
-    OE oe;
-    Strat strat;
+    L2OB ob{};
+    OE oe{ioState};
+    Strat strat{ioState, oe, ob};
 
 
 public:
 
     void run() {
-        while (true) {
+        while (!strat.isComplete) {
+            stateCheck();
             switch (state) {
                 case StrategyState::INIT: {
-                    break;
-                }
-                case StrategyState::OE_CONNECT: {
+                    assert(strat.mdFD != -1);
+                    assert(!oe.isConnected());
+                    state = StrategyState::MD_CONNECT;
                     break;
                 }
                 case StrategyState::MD_CONNECT: {
+                    assert(!oe.isConnected());
+                    assert(strat.mdFD != -1);
+                    assert(io_uring_sq_ready(&ioState.ring) == 0);
+                    assert(io_uring_cq_ready(&ioState.ring) == 0);
+                    strat.prepareRecv();
+                    io_uring_submit(&ioState.ring);
+                    break;
+                }
+                case StrategyState::OE_CONNECT: {
+                    assert(io_uring_sq_ready(&ioState.ring) == 0);
+                    assert(io_uring_cq_ready(&ioState.ring) == 0);
+
+                    oe.establishConnection();
+                    assert(oe.isConnected());
+                    assert(strat.cursor == 0);
+                    assert(strat.lastReceivedNs == 0);
+                    assert(!strat.multishotDone);
+                    state = StrategyState::RUNNING;
                     break;
                 }
                 case StrategyState::RUNNING: {
+                    assert(io_uring_sq_ready(&ioState.ring) == 0);
+                    assert(!io_uring_cq_has_overflow(&ioState.ring));
+                    assert(oe.isConnected());
+
+                    if (u32 ready = io_uring_cq_ready(&ioState.ring)) {
+                        io_uring_cqe *completions;
+                        if (io_uring_wait_cqe_nr(&ioState.ring, &completions, ready) == 0) {
+                            for (int i = 0; i < ready; ++i) {
+                                io_uring_cqe &e = completions[i];
+                                u64 userData = io_uring_cqe_get_data64(&e);
+                                if (userData == Strat::RECV_TAG) {
+                                    strat.completeMessage(e);
+                                } else {
+                                    assert(userData >= OE::ORDER_TAG);
+                                    oe.completeMessage(e);
+                                }
+                            }
+                            io_uring_cq_advance(&ioState.ring, ready);
+                        } else {
+                            perror("Failed to get ready completions");
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+
+                    assert(io_uring_cq_ready(&ioState.ring) == 0);
+                    assert(strat.isConnected() || !strat.isComplete);
                     break;
                 }
                 default: {
@@ -427,19 +657,20 @@ public:
 
             }
         }
+        cout << "Done" << endl;
     }
 
     bool stateCheck() {
         assert(strat.cursor >= 0);
         assert(strat.cursor == 0 || oe.isConnected() && strat.isConnected() && strat.lastReceivedNs > 0);
+        assert(ioState.ring.sq.ring_entries == 256);
+        assert(ioState.ring.ring_fd > 2);
         switch (state) {
             case StrategyState::INIT: {
                 assert(!oe.isConnected());
                 assert(!strat.isConnected());
                 assert(strat.cursor == 0);
                 assert(ob.seen.empty());
-                assert(ioState.ring.ring_fd > 2);
-                assert(ioState.ring.sq.ring_entries == 256);
                 assert(io_uring_sq_ready(&ioState.ring) == 0);
                 assert(io_uring_cq_ready(&ioState.ring) == 0);
                 break;
@@ -473,58 +704,28 @@ public:
 };
 
 int main() {
-    // TODO - set cpu affinity
-    /*
-     * #define _GNU_SOURCE // Required for sched_setaffinity
-#include <sched.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
 
-int main() {
-    // Get the number of available CPU cores (logical processors)
-    int numCores = sysconf(_SC_NPROCESSORS_ONLN);
+    auto numCores = sysconf(_SC_NPROCESSORS_ONLN);
     if (numCores < 0) {
         perror("sysconf");
         exit(EXIT_FAILURE);
     }
 
-    // Create a CPU set to specify the CPU affinity
     cpu_set_t cpuset;
-    CPU_ZERO(&cpuset); // Initialize the set to zero
+    CPU_ZERO(&cpuset);
+    CPU_SET(PINNED_CPU, &cpuset);
 
-    // Set the CPU affinity to the first CPU core (CPU 0)
-    CPU_SET(0, &cpuset);
-
-    // Apply the CPU affinity to the current process (or your specific PID)
-    pid_t pid = getpid(); // Get the process ID of the current process
-    if (sched_setaffinity(pid, sizeof(cpuset), &cpuset) == -1) {
+    if (sched_setaffinity(0, sizeof(cpuset), &cpuset) != 0) {
         perror("sched_setaffinity");
         exit(EXIT_FAILURE);
     }
-
-    // Check if the affinity was set successfully
-    int ret = sched_getaffinity(pid, sizeof(cpuset), &cpuset);
+    int ret = sched_getaffinity(0, sizeof(cpuset), &cpuset);
     if (ret == -1) {
         perror("sched_getaffinity");
         exit(EXIT_FAILURE);
     }
+    assert(CPU_ISSET(PINNED_CPU, &cpuset));
 
-    // Print the CPU affinity mask for the process
-    for (int i = 0; i < numCores; i++) {
-        if (CPU_ISSET(i, &cpuset)) {
-            printf("CPU %d: Yes\n", i);
-        } else {
-            printf("CPU %d: No\n", i);
-        }
-    }
-
-    // Continue with your application...
-
-    return 0;
-}
-
-     */
-    Strategy s;
+    Driver s;
     s.run();
 }

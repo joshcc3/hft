@@ -62,7 +62,6 @@ public:
 
     const string headerLine;
 
-    // TODO - use direct buffers here instead with io uring.
     std::unique_ptr<u8[]> buffer;
     u64 sentBytes = 0;
     u64 ackedBytes = 0;
@@ -408,7 +407,7 @@ public:
             cout << connectionSeen << "," << curLabResult.connectionTime << "," << curLabResult.disconnectTime << "," <<
                  orderInfo.orderInfo.submittedTime << "," << orderInfo.receivedTime << "," <<
                  orderInfo.orderInfo.triggerReceivedTime << "," << orderInfo.triggerSubmitTime << "," <<
-                 orderInfo.orderInfo.triggerEvent << "," << orderInfo.orderInfo.price << "," <<
+                 orderInfo.orderInfo.triggerEvent << "," << orderInfo.orderInfo.flags.isBid << "," << orderInfo.orderInfo.price << "," <<
                  orderInfo.orderInfo.qty << "," << orderInfo.orderInfo.id << "\n";
         }
         cout << endl;

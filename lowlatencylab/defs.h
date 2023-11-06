@@ -28,9 +28,10 @@ using u8 = uint8_t;
 using i8 = int8_t;
 
 using PriceL = i64;
+using SeqNo = i64;
 using Qty = i32;
 using OrderId = u64;
-using MDMsgId = u64;
+using MDMsgId = SeqNo;
 
 using TimeNs = i64;
 
@@ -39,8 +40,12 @@ enum Side {
     SELL
 };
 
-static PriceL PRECISION_L = PriceL(1e9);
-static double PRECISION_D = 1e9;
+static constexpr PriceL PRECISION_L = PriceL(1e6);
+static constexpr double PRECISION_D = 1e6;
+
+struct OrderFlags {
+    bool isBid: 1;
+};
 
 struct Order {
     TimeNs submittedTime = 0;
@@ -49,16 +54,19 @@ struct Order {
     OrderId id = 0;
     PriceL price = 0;
     Qty qty = 0;
+    OrderFlags flags{};
 
     Order() = default;
 
-    Order(TimeNs submittedTime, MDMsgId triggerEvent, TimeNs triggerReceivedTime, OrderId id, PriceL price, Qty qty
+    Order(TimeNs submittedTime, MDMsgId triggerEvent, TimeNs triggerReceivedTime, OrderId id, PriceL price, Qty qty,
+          OrderFlags flags
     ) : submittedTime{submittedTime},
         triggerEvent{triggerEvent},
         triggerReceivedTime{triggerReceivedTime},
         id{id},
         price{price},
-        qty{qty} {}
+        qty{qty},
+        flags{flags} {}
 };
 
 struct OrderInfo {
@@ -105,7 +113,7 @@ struct IOUringState {
 
     [[nodiscard]] io_uring_sqe *getSqe(u64 tag) {
         io_uring_sqe *sqe = io_uring_get_sqe(&ring);
-        assert(NULL != sqe);
+        assert(nullptr != sqe);
         io_uring_sqe_set_data64(sqe, tag);
 
         return sqe;
@@ -134,19 +142,21 @@ struct MDFlags {
 };
 
 struct MDPacket {
-    u64 seqNo;
-    TimeNs localTimestamp;
-    PriceL price;
-    Qty qty;
-    MDFlags flags;
-    char _padding[3];
+    SeqNo seqNo = -1;
+    TimeNs localTimestamp = 0;
+    PriceL price = 0;
+    Qty qty = 0;
+    MDFlags flags{.isTerm = true};
+    char _padding[3]{};
 
-    MDPacket() = delete;
+    MDPacket() = default;
 
-    MDPacket(u64 seqNo, TimeNs localTimestamp, PriceL price, Qty qty, MDFlags flags) : seqNo{seqNo},
-                                                                                       localTimestamp{localTimestamp},
-                                                                                       price{price}, qty{qty},
-                                                                                       flags{flags}, _padding{} {}
+    MDPacket(SeqNo seqNo, TimeNs localTimestamp, PriceL price, Qty qty, MDFlags flags) : seqNo{seqNo},
+                                                                                         localTimestamp{localTimestamp},
+                                                                                         price{price}, qty{qty},
+                                                                                         flags{flags}, _padding{} {}
+
+    MDPacket(const MDPacket& other) = default;
 
 };
 
@@ -173,10 +183,13 @@ inline constexpr int OE_PORT = 9012;
 inline std::string MCAST_ADDR = "239.255.0.1";
 inline constexpr int MCAST_PORT = 12345;
 
+inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 50'000'000;
+
 
 int
-parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localTimestamp, bool &isSnapshot, Side &side, PriceL &priceL,
-          Qty &qty) {
+parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localTimestamp, bool &isSnapshot, Side &side,
+                   PriceL &priceL,
+                   Qty &qty) {
     int matched = 6;
 
 //        string a = "deribit,BTC-PERPETUAL,";
@@ -185,13 +198,13 @@ parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localTimestamp, b
 
     // 1585699200245000
     int ix = startIx;
-    u64 _timestamp = 0;
+    TimeNs _timestamp = 0;
     for (int i = 0; i < 16; ++i) {
         _timestamp = _timestamp * 10 + (msg[++ix] - '0');
     }
 //        assert(_timestamp == timestamp);
     ++ix;
-    u64 _localtimestamp = 0;
+    TimeNs _localtimestamp = 0;
     for (int i = 0; i < 16; ++i) {
         _localtimestamp = _localtimestamp * 10 + (msg[++ix] - '0');
     }
@@ -207,13 +220,13 @@ parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localTimestamp, b
 
     PriceL _price{};
     ix += 3;
-    u64 decimal = 0;
+    PriceL decimal = 0;
     while (msg[++ix] != ',' && msg[ix] != '.') {
         decimal = decimal * 10 + (msg[ix] - '0');
     }
-    u64 fraction{};
+    PriceL fraction{};
     if (msg[ix] == '.') {
-        u64 mult = PRECISION_L;
+        PriceL mult = PRECISION_L;
         while (msg[++ix] != ',') {
             fraction = fraction * 10 + (msg[ix] - '0');
             mult /= 10;
