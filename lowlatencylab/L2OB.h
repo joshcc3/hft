@@ -111,7 +111,6 @@ public:
         stateChecks();
     }
 
-private:
 
     // debug
     std::unordered_set<PriceL> seen;

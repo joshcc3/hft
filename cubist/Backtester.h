@@ -14,6 +14,72 @@
 #include "BacktestListener.cpp"
 
 
+int
+parseLine(const char *msg, TimeNs &timestamp, TimeNs &localTimestamp, bool &isSnapshot, Side &side, PriceL &priceL,
+          Qty &qty) {
+    int matched = 6;
+
+//        string a = "deribit,BTC-PERPETUAL,";
+//        static_assert(sizeof(string) == 24 && a.size() == 22); // small string optimization
+    int startIx = 21; // a.size() - 1;
+
+    // 1585699200245000
+    int ix = startIx;
+    u64 _timestamp = 0;
+    for (int i = 0; i < 16; ++i) {
+        _timestamp = _timestamp * 10 + (msg[++ix] - '0');
+    }
+//        assert(_timestamp == timestamp);
+    ++ix;
+    u64 _localtimestamp = 0;
+    for (int i = 0; i < 16; ++i) {
+        _localtimestamp = _localtimestamp * 10 + (msg[++ix] - '0');
+    }
+//        assert(_localtimestamp == localTimestamp);
+
+    ix += 2;
+    bool _isSnapshot = msg[ix] == 't';
+//        assert(_isSnapshot == isSnapshot);
+
+    ix += _isSnapshot ? 5 : 6;
+    Side _side_ = msg[ix] == 'b' ? Side::BUY : Side::SELL;
+//        assert(side == _side_);
+
+    PriceL _price{};
+    ix += 3;
+    u64 decimal = 0;
+    while (msg[++ix] != ',' && msg[ix] != '.') {
+        decimal = decimal * 10 + (msg[ix] - '0');
+    }
+    u64 fraction{};
+    if (msg[ix] == '.') {
+        u64 mult = PRECISION;
+        while (msg[++ix] != ',') {
+            fraction = fraction * 10 + (msg[ix] - '0');
+            mult /= 10;
+        }
+        _price = decimal * PRECISION + fraction * mult;
+    } else {
+        _price = decimal * PRECISION;
+    }
+//        assert(_price == priceL);
+
+    Qty _qty{};
+    while (msg[++ix] != '\0') {
+        _qty = _qty * 10 + (msg[ix] - '0');
+    }
+//        assert(_qty == qty);
+
+    timestamp = _timestamp;
+    localTimestamp = _localtimestamp;
+    isSnapshot = _isSnapshot;
+    side = _side_;
+    priceL = _price;
+    qty = _qty;
+    return matched;
+}
+
+
 struct BacktestCfg {
     TimeNs exchangeStratLatency;
     TimeNs stratExchangeLatency;
@@ -72,71 +138,6 @@ private:
     std::vector<InboundMsg> _processOutbound(TimeNs timeNs, const OutboundMsg::Cancel &cancel);
 
     std::vector<InboundMsg> _processOutbound(TimeNs timeNs, const OutboundMsg::Modify &modify);
-
-    int
-    parseLine(const char *msg, TimeNs &timestamp, TimeNs &localTimestamp, bool &isSnapshot, Side &side, PriceL &priceL,
-              Qty &qty) {
-        int matched = 6;
-
-//        string a = "deribit,BTC-PERPETUAL,";
-//        static_assert(sizeof(string) == 24 && a.size() == 22); // small string optimization
-        int startIx = 21; // a.size() - 1;
-
-        // 1585699200245000
-        int ix = startIx;
-        u64 _timestamp = 0;
-        for (int i = 0; i < 16; ++i) {
-            _timestamp = _timestamp * 10 + (msg[++ix] - '0');
-        }
-//        assert(_timestamp == timestamp);
-        ++ix;
-        u64 _localtimestamp = 0;
-        for (int i = 0; i < 16; ++i) {
-            _localtimestamp = _localtimestamp * 10 + (msg[++ix] - '0');
-        }
-//        assert(_localtimestamp == localTimestamp);
-
-        ix += 2;
-        bool _isSnapshot = msg[ix] == 't';
-//        assert(_isSnapshot == isSnapshot);
-
-        ix += _isSnapshot ? 5 : 6;
-        Side _side_ = msg[ix] == 'b' ? Side::BUY : Side::SELL;
-//        assert(side == _side_);
-
-        PriceL _price{};
-        ix += 3;
-        u64 decimal = 0;
-        while (msg[++ix] != ',' && msg[ix] != '.') {
-            decimal = decimal * 10 + (msg[ix] - '0');
-        }
-        u64 fraction{};
-        if (msg[ix] == '.') {
-            u64 mult = PRECISION;
-            while (msg[++ix] != ',') {
-                fraction = fraction * 10 + (msg[ix] - '0');
-                mult /= 10;
-            }
-            _price = decimal * PRECISION + fraction * mult;
-        } else {
-            _price = decimal * PRECISION;
-        }
-//        assert(_price == priceL);
-
-        Qty _qty{};
-        while (msg[++ix] != '\0') {
-            _qty = _qty * 10 + (msg[ix] - '0');
-        }
-//        assert(_qty == qty);
-
-        timestamp = _timestamp;
-        localTimestamp = _localtimestamp;
-        isSnapshot = _isSnapshot;
-        side = _side_;
-        priceL = _price;
-        qty = _qty;
-        return matched;
-    }
 };
 
 

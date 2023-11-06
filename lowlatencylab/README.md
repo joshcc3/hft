@@ -32,6 +32,26 @@ It is simultaneously waiting for messages on the order entry path tcp path.
 When it receives a message on the order entry path it logs the fields and the time it received it to stdout. 
 If the order entry path disconnects the exchange stops sending multicast data, closes all active connections and files
 however keeps the servers up and listening for connections and moves back to the init state.
+The trigger id is the id of the marketdata.
+We setup the server to only send non-blocking.
+
+Notes on io_uring:
+use the params in queue_init to check for features.
+there are many features around polling that might be more suitable for my workload.
+
+
+
+We want to implement a trading strategy. Write c++ code that does the following. It should use the io_uring library
+for all networking and io operations.
+It first connects to localhost port 9012 for order entry.
+After the connection is established it listens to the multicast address 239.255.0.1:12345
+for l2 marketdata packets. The packets are ascii with the fields 'exchange,symbol,timestamp,local_timestamp,is_snapshot,side,price,amount'.
+We shall treat the local_timestamp as the sequence number.
+Every packet it sees, it parses (just call out to a stub that gets the individual fields) and then
+updates an l2 lob. the messages will either be update or cancel. pass the is_snapshot field to the update. 
+Cancels can never be snapshot. A message is a cancel if the qty is 0.
+If the update is within 5 levels of the top and the size increase to the level is > 50000000, then we want to send an
+aggressive limit to the top level of the book on the other side.
 
 
 
@@ -39,8 +59,18 @@ Use the packet system call to get packets directly from the link layer.
 SO_RCVLOWAT and SO_SNDLOWAT
 IORING_SETUP_SQPOLL in io_uring_setup
 
+IORING_OP_SEND_ZC iouring flags
+
 IP_TOS (since Linux 1.0)
+
+Use POLLHUP - to determine when the socket has hung up
+
+
+
+Use SIOCGSTAMP - for round trip time measurements.
 
 
 For io_uring:
 https://kernel.dk/io_uring.pdf
+
+https://javadoc.lwjgl.org/org/lwjgl/system/linux/liburing/LibIOURing.html

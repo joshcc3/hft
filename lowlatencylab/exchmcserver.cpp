@@ -4,7 +4,6 @@
 
 #include "defs.h"
 
-#include <chrono>
 #include <unordered_map>
 #include <iostream>
 #include <fstream>
@@ -15,6 +14,7 @@
 #include <vector>
 #include <netinet/in.h>
 #include <cassert>
+#include <cstdlib>
 #include <liburing.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -34,84 +34,11 @@ using std::endl;
 using std::size_t;
 
 
-TimeNs currentTimeNs() {
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-            (std::chrono::system_clock::now()).time_since_epoch()).count();
-}
-
 // A simple State enum for Exchange state management.
 enum class ExchangeState {
     INIT, HANDSHAKE, TRANSMIT
 };
 
-struct IOUringState {
-
-    static constexpr int QUEUE_DEPTH = 1 << 8;
-
-    struct io_uring ring{};
-
-    IOUringState() {
-        struct io_uring_params params{.flags = IORING_SETUP_SINGLE_ISSUER};
-        if (int error = io_uring_queue_init_params(QUEUE_DEPTH, &ring, &params) < 0) {
-            cerr << "Queue init failed [" << error << "]." << endl;
-            throw std::runtime_error("Unable to setup io_uring queue");
-        }
-        assert(params.sq_entries == QUEUE_DEPTH);
-        assert(params.cq_entries == QUEUE_DEPTH * 2);
-        assert(params.features & IORING_FEAT_SUBMIT_STABLE);
-        assert(params.features & IORING_FEAT_CQE_SKIP);
-
-        assert(ring.sq.ring_entries == QUEUE_DEPTH);
-        assert(ring.cq.ring_entries == 2 * QUEUE_DEPTH);
-        assert(ring.sq.sqe_tail == ring.sq.sqe_head);
-
-    }
-
-    ~IOUringState() {
-        io_uring_queue_exit(&ring);
-    }
-
-    [[nodiscard]] io_uring_sqe *getSqe(u64 tag) {
-        io_uring_sqe *sqe = io_uring_get_sqe(&ring);
-        assert(NULL != sqe);
-        io_uring_sqe_set_data64(sqe, tag);
-
-        return sqe;
-    }
-
-    int submit() {
-        int submitted = io_uring_submit(&ring);
-        assert(submitted > 0);
-        return submitted;
-    }
-
-    io_uring_cqe *popCqe() {
-        io_uring_cqe *cqe;
-        int res = io_uring_wait_cqe(&ring, &cqe);
-        assert(res == 0);
-        u64 tag = io_uring_cqe_get_data64(cqe);
-        assert(tag >= 0);
-        return cqe;
-    }
-};
-
-bool operator==(const IOUringState &s1, const IOUringState &s2) {
-    return &s1 == &s2;
-}
-
-struct cqe_guard {
-
-    io_uring_cqe *completion;
-    IOUringState &ring;
-
-    explicit cqe_guard(IOUringState &ring) : ring{ring} {
-        completion = ring.popCqe();
-    }
-
-    ~cqe_guard() {
-        io_uring_cqe_seen(&ring.ring, completion);
-    }
-};
 
 struct LabResult {
     TimeNs connectionTime;
@@ -130,15 +57,13 @@ struct LabResult {
 class MDServer {
 public:
     static constexpr int MD_SEND_TAG = 3;
-    const string MCAST_ADDR = "239.255.0.1";
-    static constexpr int MCAST_PORT = 12345;
     static constexpr int SND_BUF_SZ = 1 << 16;
-    static constexpr int SND_BUF_HIGH_WATERMARK = SND_BUF_SZ * 0.7;
+    static constexpr int SND_BUF_HIGH_WATERMARK = int(SND_BUF_SZ * 0.7);
 
     const string headerLine;
 
     // TODO - use direct buffers here instead with io uring.
-    std::unique_ptr<char[]> buffer;
+    std::unique_ptr<u8[]> buffer;
     u64 sentBytes = 0;
     u64 ackedBytes = 0;
 
@@ -160,7 +85,7 @@ public:
             ifile{ifile},
             inbuf{},
             instream{&inbuf},
-            buffer{std::make_unique<char[]>(SND_BUF_SZ)} {
+            buffer{std::make_unique<u8[]>(SND_BUF_SZ)} {
 
         // Create a socket for sending to a multicast address
         serverFD = socket(AF_INET, SOCK_DGRAM, 0);
@@ -210,6 +135,46 @@ public:
 
     }
 
+    void fillMDPacket(u8 *&bufPos, u32 &bufLen, TimeNs timeNow, const string &line) {
+
+        TimeNs timestamp = 0;
+        TimeNs localTimestamp = 0;
+        Side side;
+        PriceL price = -1;
+        Qty qty = -1;
+        bool isBid;
+        bool isSnapshot;
+
+        parseDeribitMDLine(line.c_str(), timestamp, localTimestamp, isSnapshot, side, price, qty);
+        assert(timestamp && localTimestamp);
+        assert(side == Side::BUY || side == Side::SELL);
+        assert(price && qty);
+
+        isBid = side == Side::BUY;
+
+        MDPacket &packet = *reinterpret_cast<MDPacket *>(bufPos);
+        packet.seqNo = cursor;
+        packet.localTimestamp = timeNow;
+        packet.price = price;
+        packet.qty = qty;
+        packet.flags.isBid = isBid;
+        packet.flags.isSnapshot = isSnapshot;
+        packet.flags.isSnapshot = false;
+
+        assert(packet.seqNo == cursor);
+        assert(packet.localTimestamp == timeNow);
+        assert(packet.price == price);
+        assert(packet.qty == qty);
+        assert(packet.flags.isBid == isBid);
+        assert(packet.flags.isSnapshot == isSnapshot);
+        assert(!packet.flags.isTerm);
+
+        bufPos += sizeof(packet);
+        bufLen += sizeof(packet);
+
+        eventTimeMp.emplace(cursor++, timeNow);
+
+    }
 
     void prepBuffer() {
         assert(serverFD != -1);
@@ -217,22 +182,23 @@ public:
 
         assert(io_uring_sq_space_left(&ioState.ring) > 1);
         assert(io_uring_cq_ready(&ioState.ring) < ioState.ring.cq.ring_entries - 2);
-        if (sentBytes - ackedBytes < SND_BUF_HIGH_WATERMARK ) {
+        if (sentBytes - ackedBytes < SND_BUF_HIGH_WATERMARK) {
 
             auto timeNow = currentTimeNs();
 
             u32 bufLen = 0;
-            char *bufStart = buffer.get();
-            char *bufPos = bufStart;
+            u8 *bufStart = buffer.get();
+            u8 *bufPos = bufStart;
             string line;
             for (int i = 0; i < 5 && !instream.eof(); ++i) {
                 std::getline(instream, line);
                 if (!line.empty()) {
-                    eventTimeMp.emplace(cursor++, timeNow);
-                    std::copy(line.begin(), line.end(), bufPos);
-                    bufPos += line.size();
-                    bufLen += line.size();
+                    fillMDPacket(bufPos, bufLen, timeNow, line);
                 } else {
+                    MDPacket &terminationPacket = *reinterpret_cast<MDPacket *>(bufPos);
+                    terminationPacket.flags.isTerm = true;
+                    bufPos += sizeof(MDPacket);
+                    bufLen += sizeof(MDPacket);
                     assert(instream.eof());
                 }
             }
@@ -305,7 +271,7 @@ public:
         }
     }
 
-    void throttle(u64 userData) {
+    void throttle(u64 userData) const {
         assert(userData > MD_SEND_TAG);
         u64 throttledBytes = userData - MD_SEND_TAG;
         assert(throttledBytes > ackedBytes);
@@ -321,8 +287,6 @@ public:
     const int ACCEPT_TAG = 0;
     const int BUFFER_TAG = 1;
     const int RECV_TAG = 2;
-
-    static constexpr int PORT = 9012;
 
     IOUringState &ioState;
     const MDServer &md;
@@ -380,7 +344,7 @@ public:
 
         serverAddr.sin_family = AF_INET;
         serverAddr.sin_addr.s_addr = INADDR_ANY;
-        serverAddr.sin_port = htons(PORT);
+        serverAddr.sin_port = htons(OE_PORT);
 
         if (bind(serverFD, (struct sockaddr *) &serverAddr, sizeof(serverAddr)) < 0) {
             throw std::runtime_error("Bind failed");
@@ -462,6 +426,7 @@ public:
     }
 
     void prepareRecv() {
+        assert(used.all() || !used.any());
         used.reset();
 
         io_uring_sqe *bufferSqe = ioState.getSqe(BUFFER_TAG);
@@ -480,7 +445,7 @@ public:
         assert(clientFD != -1);
         assert(isAlive);
         io_uring_sqe *recvSqe = ioState.getSqe(RECV_TAG);
-        io_uring_prep_recv_multishot(recvSqe, clientFD, NULL, 0, 0);
+        io_uring_prep_recv_multishot(recvSqe, clientFD, nullptr, 0, 0);
         assert(recvSqe->flags == 0);
         int ogFlags = recvSqe->flags;
         recvSqe->flags |= IOSQE_BUFFER_SELECT;
