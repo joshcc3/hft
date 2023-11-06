@@ -74,3 +74,6 @@ For io_uring:
 https://kernel.dk/io_uring.pdf
 
 https://javadoc.lwjgl.org/org/lwjgl/system/linux/liburing/LibIOURing.html
+
+iouring examples:
+https://github.com/axboe/liburing/blob/master/examples/io_uring-udp.c

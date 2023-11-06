@@ -445,6 +445,7 @@ public:
         assert(isAlive);
         io_uring_sqe *recvSqe = ioState.getSqe(RECV_TAG);
         io_uring_prep_recv_multishot(recvSqe, clientFD, nullptr, 0, 0);
+        recvSqe->buf_group = GROUP_ID;
         assert(recvSqe->flags == 0);
         int ogFlags = recvSqe->flags;
         recvSqe->flags |= IOSQE_BUFFER_SELECT;

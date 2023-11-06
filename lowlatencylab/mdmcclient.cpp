@@ -2,7 +2,6 @@
 // Created by jc on 04/11/23.
 //
 
-#include "exchmcserver.h"
 #include "mdmcclient.h"
 #include "L2OB.h"
 #include "defs.h"
@@ -14,16 +13,13 @@
 #include <x86intrin.h>
 #include <memory>
 #include <bitset>
-#include <cstddef>
-#include <vector>
 #include <cassert>
-#include <memory>
 #include <new>
 #include <sched.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstdlib>
 #include <unistd.h>
-
+#include <cstring>
 
 
 enum class StrategyState {
@@ -45,10 +41,10 @@ public:
     int clientFD = -1;
     OrderId orderId = 1;
 
-    sockaddr_in serverAddr;
+    sockaddr_in serverAddr{};
 
     static constexpr size_t msgSize = sizeof(Order);
-    char outputBuf[msgSize];
+    char outputBuf[msgSize]{};
     Order curOrder;
 
     explicit OE(IOUringState &ioState) : ioState{ioState} {}
@@ -167,6 +163,8 @@ public:
         io_uring_prep_send(submitSqe, clientFD, static_cast<void *>(outputBuf), msgSize, sendFlags);
         assert(submitSqe->flags == 0);
 
+        assert(io_uring_sq_ready(&ioState.ring) == 0);
+
         int submits = io_uring_submit(&ioState.ring);
         assert(submits == 1);
 
@@ -266,7 +264,7 @@ struct UDPBuffer {
         assert(ringBuffer[bufferPos].seqNo == msg.seqNo);
         assert(ringBuffer[bufferPos].price == msg.price);
         assert(ringBuffer[bufferPos].localTimestamp == msg.localTimestamp);
-        return isFull ? bufferOffs + 1 : 0;
+        return isFull ? i32(bufferOffs + 1) : 0;
     }
 
     void advance(int n) {
@@ -279,31 +277,113 @@ struct UDPBuffer {
     }
 };
 
-class Strat {
-public:
+struct ReceiveHeader {
+    static constexpr int GROUP_ID = 2;
+    static constexpr int NUM_BUFFERS = 1 << 6;
+    constexpr static int NAME_LEN = 64;
+    constexpr static int CONTROL_LEN = 0;
+    static constexpr int BUFFER_SIZE = 1 << 9;
     constexpr static int BUFFER_TAG = 0;
     constexpr static int RECV_TAG = 1;
 
+    msghdr hdr{};
+    char sourceAddr[NAME_LEN]{};
+    iovec vecs[NUM_BUFFERS]{};
+    char controlData[CONTROL_LEN];
+
+    std::unique_ptr<u8[]> buffers;
+    std::bitset<ReceiveHeader::NUM_BUFFERS> used;
+
+
+    ReceiveHeader(): buffers{std::make_unique<u8[]>(BUFFER_SIZE * ReceiveHeader::NUM_BUFFERS)},
+                     used{} {
+
+        for(int i = 0; i < NUM_BUFFERS; ++i) {
+            vecs[i].iov_base = buffers.get() + i * BUFFER_SIZE;
+            vecs[i].iov_len = BUFFER_SIZE;
+        }
+
+        hdr.msg_name = sourceAddr;
+        hdr.msg_namelen = NAME_LEN;
+        hdr.msg_control = controlData;
+        hdr.msg_controllen = CONTROL_LEN;
+        hdr.msg_iov = vecs;
+        hdr.msg_iovlen = NUM_BUFFERS;
+        hdr.msg_flags = 0;
+    }
+    
+    u8* complete(io_uring_cqe& completion) {
+        u32 bufferIx = completion.flags >> (sizeof(completion.flags) * 8 - 16);
+        assert(bufferIx < ReceiveHeader::NUM_BUFFERS);
+        assert(!used.test(bufferIx));
+
+        u8 *buf = buffers.get() + bufferIx * BUFFER_SIZE;
+        used.set(bufferIx);
+
+        i32 datagramLen = completion.res;
+        io_uring_recvmsg_out *out = io_uring_recvmsg_validate(static_cast<void *>(buf), datagramLen, &hdr);
+        assert(nullptr != out);
+
+        assert(!(out->flags & MSG_TRUNC));
+        assert(!(out->flags & MSG_OOB));
+
+        u32 receivedLen = io_uring_recvmsg_payload_length(out, datagramLen, &hdr);
+        assert(receivedLen == datagramLen);
+
+        u8 *payload = static_cast<u8 *>(io_uring_recvmsg_payload(out, &hdr));
+        
+        return payload;
+    }
+
+    void prepareRecv(IOUringState& ioState, int mdFD) {
+        assert(used.all() || !used.any());
+        used.reset();
+
+        io_uring_sqe *bufferSqe = ioState.getSqe(BUFFER_TAG);
+        io_uring_prep_provide_buffers(bufferSqe, buffers.get(), BUFFER_SIZE, ReceiveHeader::NUM_BUFFERS, GROUP_ID, 0);
+        assert(io_uring_sq_ready(&ioState.ring) == 1);
+        int completed = io_uring_submit_and_wait(&ioState.ring, 1);
+        assert(completed == 1);
+        assert(io_uring_sq_ready(&ioState.ring) == 0);
+        {
+            cqe_guard g{ioState};
+            assert(g.completion->res == ReceiveHeader::NUM_BUFFERS || g.completion->res == 0);
+            assert((io_uring_cqe_get_data64(g.completion)) == BUFFER_TAG);
+
+        }
+
+        assert(mdFD != -1);
+        io_uring_sqe *recvSqe = ioState.getSqe(RECV_TAG);
+        io_uring_prep_recvmsg_multishot(recvSqe, mdFD, &hdr, MSG_TRUNC);
+        bufferSqe->buf_group = GROUP_ID;
+
+        assert(recvSqe->flags == 0);
+        int ogFlags = recvSqe->flags;
+        recvSqe->flags |= IOSQE_BUFFER_SELECT;
+        assert(recvSqe->flags == (ogFlags | IOSQE_BUFFER_SELECT));
+        recvSqe->buf_group = GROUP_ID;
+    }
+};
+
+class Strat {
+public:
+
+    bool isComplete = false;
+
     L2OB &ob;
     OE &orderEntry;
-    IOUringState &ioState;
-    TimeNs lastReceivedNs = -1;
-    int mdFD = -1;
-    bool isComplete = false;
-    SeqNo cursor = 0;
-    UDPBuffer udpBuf{};
 
-    static constexpr int BUFFER_SIZE = 1 << 12;
-    static constexpr int NUM_BUFFERS = 16;
-    static constexpr int GROUP_ID = 2;
-    std::unique_ptr<u8[]> buffers;
-    std::bitset<NUM_BUFFERS> used;
+    IOUringState &ioState;
+    ReceiveHeader receiveHdr{};
+    UDPBuffer udpBuf{};
+    int mdFD = -1;
     bool multishotDone = true;
+    SeqNo cursor = 0;
+    TimeNs lastReceivedNs = -1;
+
 
     Strat(IOUringState &ioState, OE &oe, L2OB &ob) : ioState{ioState},
                                                      orderEntry{oe},
-                                                     buffers{std::make_unique<u8[]>(BUFFER_SIZE * NUM_BUFFERS)},
-                                                     used{},
                                                      ob{ob} {
 
         mdFD = socket(AF_INET, SOCK_DGRAM, 0);
@@ -390,6 +470,7 @@ public:
             PriceL notionalChange = price * qty - sidePrice * sideQty;
 
             if (bidSize != -1 && askSize != -1) {
+                // TODO - why the hell is this the case?
                 if (notionalChange > TRADE_THRESHOLD) {
                     PriceL tradePrice = oppSidePrice;
                     OrderFlags flags{.isBid = !isBid};
@@ -415,7 +496,7 @@ public:
         u32 ogLowestSeqNum = udpBuf.lowestSeqNum;
         u32 ogHead = udpBuf.head;
         bool ogMultishotDone = multishotDone;
-        std::bitset<NUM_BUFFERS> ogUsed{used};
+        std::bitset<ReceiveHeader::NUM_BUFFERS> ogUsed{receiveHdr.used};
 
         u8 *finalBufPos = inBuf;
 
@@ -468,7 +549,7 @@ public:
         assert(udpBuf.lowestSeqNum >= ogLowestSeqNum);
         assert(udpBuf.lowestSeqNum == ogLowestSeqNum || udpBuf.head != ogHead);
         assert(multishotDone == ogMultishotDone);
-        assert(ogUsed == used);
+        assert(ogUsed == receiveHdr.used);
         assert(finalBufPos - inBuf == numPackets * sizeof(MDPacket));
 
         return finalBufPos;
@@ -485,9 +566,9 @@ public:
         assert(!udpBuf.test(0));
         assert(orderEntry.isConnected());
 
-        int ogMask = udpBuf.mask;
-        int ogSeqNo = udpBuf.lowestSeqNum;
-        int ogCursor = cursor;
+        u32 ogMask = udpBuf.mask;
+        SeqNo ogSeqNo = udpBuf.lowestSeqNum;
+        SeqNo ogCursor = cursor;
 
         i32 cRes = completion.res;
         u32 cFlags = completion.flags;
@@ -496,7 +577,7 @@ public:
         assert(cRes > 0);
         assert(cFlags & IORING_CQE_F_BUFFER);
         assert(!(cFlags & IORING_CQE_F_NOTIF));
-        assert(cUserData == RECV_TAG);
+        assert(cUserData == ReceiveHeader::RECV_TAG);
 
         bool isAlive = isConnected();
 
@@ -507,25 +588,17 @@ public:
         assert(isAlive == !(cRes > 0 || -cRes == EBADF));
 
         if (isAlive) {
-            u32 bufferIx = completion.flags >> (sizeof(completion.flags) * 8 - 16);
-            assert(bufferIx < NUM_BUFFERS);
-            assert(!used.test(bufferIx));
-
-            u8 *buf = buffers.get() + bufferIx * BUFFER_SIZE;
-            int bytesRead = cRes;
+            u8 *buf = receiveHdr.complete(completion);
+            int bytesRead = completion.res;
             u64 numPackets = bytesRead / sizeof(MDPacket);
             assert(bytesRead % sizeof(MDPacket) == 0);
-
-
             u8 *endBuf = handleMessages(buf, numPackets, curTime);
             assert(endBuf == buf + sizeof(Order) * numPackets);
-
-            used.set(bufferIx);
         }
 
 
         if (multishotDone && isAlive) {
-            assert(used.all());
+            assert(receiveHdr.used.all());
             prepareRecv();
         }
 
@@ -541,30 +614,7 @@ public:
 
 
     void prepareRecv() {
-        assert(used.all() || !used.any());
-        used.reset();
-
-        io_uring_sqe *bufferSqe = ioState.getSqe(BUFFER_TAG);
-        io_uring_prep_provide_buffers(bufferSqe, buffers.get(), BUFFER_SIZE, NUM_BUFFERS, GROUP_ID, 0);
-        assert(io_uring_sq_ready(&ioState.ring) == 1);
-        int completed = io_uring_submit_and_wait(&ioState.ring, 1);
-        assert(completed == 1);
-        assert(io_uring_sq_ready(&ioState.ring) == 0);
-        {
-            cqe_guard g{ioState};
-            assert(g.completion->res == NUM_BUFFERS || g.completion->res == 0);
-            assert((io_uring_cqe_get_data64(g.completion)) == BUFFER_TAG);
-
-        }
-
-        assert(mdFD != -1);
-        io_uring_sqe *recvSqe = ioState.getSqe(RECV_TAG);
-        io_uring_prep_recv_multishot(recvSqe, mdFD, nullptr, 0, 0);
-        assert(recvSqe->flags == 0);
-        int ogFlags = recvSqe->flags;
-        recvSqe->flags |= IOSQE_BUFFER_SELECT | IORING_RECVSEND_POLL_FIRST;
-        assert(recvSqe->flags == (ogFlags | IOSQE_BUFFER_SELECT));
-        recvSqe->buf_group = GROUP_ID;
+        receiveHdr.prepareRecv(ioState, mdFD);
         multishotDone = false;
 
     }
@@ -575,6 +625,7 @@ public:
         return !isComplete && mdFD != -1 && notDelayed;
     }
 };
+
 
 class Driver {
 
@@ -606,11 +657,27 @@ public:
                     assert(io_uring_cq_ready(&ioState.ring) == 0);
                     strat.prepareRecv();
                     io_uring_submit(&ioState.ring);
+                    state = StrategyState::OE_CONNECT;
                     break;
                 }
                 case StrategyState::OE_CONNECT: {
                     assert(io_uring_sq_ready(&ioState.ring) == 0);
-                    assert(io_uring_cq_ready(&ioState.ring) == 0);
+                    
+                    if(int ready = io_uring_cq_ready(&ioState.ring) != 0) {
+                        assert(ready == 1);
+                        io_uring_cqe *entries;
+                        if(io_uring_wait_cqe_nr(&ioState.ring, &entries, 1) == 0) {
+                            io_uring_cqe &cqe = entries[0];
+                            assert(cqe.res < 0);
+                            assert(io_uring_cqe_get_data64(&cqe) == ReceiveHeader::RECV_TAG);
+                            cout << "Invalid request (" << -cqe.res << ") " << strerror(-cqe.res) <<  endl;
+                            exit(EXIT_FAILURE);
+                        } else {
+                            perror("Failed to request in error condition");
+                            exit(EXIT_FAILURE);
+                        }
+                        
+                    }
 
                     oe.establishConnection();
                     assert(oe.isConnected());
@@ -631,7 +698,7 @@ public:
                             for (int i = 0; i < ready; ++i) {
                                 io_uring_cqe &e = completions[i];
                                 u64 userData = io_uring_cqe_get_data64(&e);
-                                if (userData == Strat::RECV_TAG) {
+                                if (userData == ReceiveHeader::RECV_TAG) {
                                     strat.completeMessage(e);
                                 } else {
                                     assert(userData >= OE::ORDER_TAG);
@@ -682,7 +749,7 @@ public:
                 break;
             }
             case StrategyState::OE_CONNECT: {
-                assert(strat.isConnected());
+                assert(strat.lastReceivedNs <= 0 || strat.isConnected());
                 assert(!oe.isConnected());
                 assert(strat.cursor == 0);
                 assert(ob.seen.empty());
@@ -690,7 +757,7 @@ public:
             }
             case StrategyState::RUNNING: {
                 assert(oe.isConnected());
-                assert(strat.isConnected());
+                assert(strat.lastReceivedNs <= 0 || strat.isConnected());
                 assert(std::abs(currentTimeNs() - strat.lastReceivedNs) < 1'000'000);
                 break;
             }
