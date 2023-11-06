@@ -31,6 +31,7 @@ enum class StrategyState {
 
 constexpr static int PINNED_CPU = 0;
 
+// TODO - try and use oob data to send quick packets and see how much of a difference it makes for the exchange to receive it
 class OE {
 public:
     // TODO Use POLLHUP to determine when the other end has hung up
@@ -279,7 +280,7 @@ struct UDPBuffer {
 
 struct ReceiveHeader {
     static constexpr int GROUP_ID = 2;
-    static constexpr int NUM_BUFFERS = 1 << 6;
+    static constexpr int NUM_BUFFERS = 1 << 5;
     constexpr static int NAME_LEN = 64;
     constexpr static int CONTROL_LEN = 0;
     static constexpr int BUFFER_SIZE = 1 << 9;
@@ -354,14 +355,16 @@ struct ReceiveHeader {
 
         assert(mdFD != -1);
         io_uring_sqe *recvSqe = ioState.getSqe(RECV_TAG);
-        io_uring_prep_recvmsg_multishot(recvSqe, mdFD, &hdr, MSG_TRUNC);
-        bufferSqe->buf_group = GROUP_ID;
-
-        assert(recvSqe->flags == 0);
+        io_uring_prep_recvmsg_multishot(recvSqe, 0, &hdr, MSG_TRUNC); // Use mdFD
         int ogFlags = recvSqe->flags;
-        recvSqe->flags |= IOSQE_BUFFER_SELECT;
-        assert(recvSqe->flags == (ogFlags | IOSQE_BUFFER_SELECT));
-        recvSqe->buf_group = GROUP_ID;
+        recvSqe->flags |= IOSQE_BUFFER_SELECT | IOSQE_FIXED_FILE;
+        assert(recvSqe->flags == (ogFlags | IOSQE_BUFFER_SELECT | IOSQE_FIXED_FILE));
+
+        assert(recvSqe->opcode == IORING_OP_RECVMSG);
+        assert(recvSqe->fd == 0);
+        assert(recvSqe->off == 0);
+        assert(recvSqe->flags == (IOSQE_BUFFER_SELECT | IOSQE_FIXED_FILE));
+        assert(recvSqe->user_data == RECV_TAG);
     }
 };
 
@@ -470,7 +473,6 @@ public:
             PriceL notionalChange = price * qty - sidePrice * sideQty;
 
             if (bidSize != -1 && askSize != -1) {
-                // TODO - why the hell is this the case?
                 if (notionalChange > TRADE_THRESHOLD) {
                     PriceL tradePrice = oppSidePrice;
                     OrderFlags flags{.isBid = !isBid};
@@ -632,6 +634,7 @@ class Driver {
     StrategyState state = StrategyState::INIT;
 
     IOUringState ioState{};
+    int fileTable[1];
 
     L2OB ob{};
     OE oe{ioState};
@@ -647,6 +650,10 @@ public:
                 case StrategyState::INIT: {
                     assert(strat.mdFD != -1);
                     assert(!oe.isConnected());
+                    assert(fileTable[0] != strat.mdFD);
+                    fileTable[0] = strat.mdFD;
+                    io_uring_register_files(&ioState.ring, fileTable, 1);
+
                     state = StrategyState::MD_CONNECT;
                     break;
                 }
