@@ -184,6 +184,7 @@ public:
                        [](const LevelInfo &l) { return l.price; });
         assert(other == seen);
 
+        return true;
     }
 };
 

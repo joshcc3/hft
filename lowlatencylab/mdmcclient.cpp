@@ -25,7 +25,6 @@
 #include <unistd.h>
 
 
-#define _GNU_SOURCE
 
 enum class StrategyState {
     INIT,
@@ -225,7 +224,7 @@ struct UDPBuffer {
     static_assert(__builtin_popcount(Sz) == 1);
     static_assert(Sz == 32);
 
-    using BufferItem = const MDPacket;
+    using BufferItem = MDPacket;
     u32 mask = 0;
     SeqNo lowestSeqNum = 0;
     u32 head = 0;
@@ -700,6 +699,7 @@ public:
                 assert(false);
             }
         }
+        return true;
     }
 };
 

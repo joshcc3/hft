@@ -79,7 +79,7 @@ struct OrderInfo {
 };
 
 
-TimeNs currentTimeNs() {
+inline TimeNs currentTimeNs() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
             (std::chrono::system_clock::now()).time_since_epoch()).count();
 }
@@ -160,7 +160,7 @@ struct MDPacket {
 
 };
 
-bool operator==(const IOUringState &s1, const IOUringState &s2) {
+inline bool operator==(const IOUringState &s1, const IOUringState &s2) {
     return &s1 == &s2;
 }
 
@@ -186,7 +186,7 @@ inline constexpr int MCAST_PORT = 12345;
 inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 50'000'000;
 
 
-int
+inline int
 parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localTimestamp, bool &isSnapshot, Side &side,
                    PriceL &priceL,
                    Qty &qty) {
