@@ -127,7 +127,7 @@ public:
         if (int res = connect(clientFD, (struct sockaddr *) &serverAddr, sizeof(serverAddr))) {
             perror("Bind to server socket failed.");
             cerr <<
-            close(clientFD);
+                 close(clientFD);
             exit(EXIT_FAILURE);
         }
 
@@ -290,6 +290,8 @@ struct ReceiveHeader {
     constexpr static int BUFFER_TAG = 0;
     constexpr static int RECV_TAG = 1;
 
+    sockaddr_in addr{};
+
     msghdr hdr{};
     char sourceAddr[NAME_LEN]{};
     iovec vecs[NUM_BUFFERS]{};
@@ -299,10 +301,10 @@ struct ReceiveHeader {
     std::bitset<ReceiveHeader::NUM_BUFFERS> used;
 
 
-    ReceiveHeader(): buffers{std::make_unique<u8[]>(BUFFER_SIZE * ReceiveHeader::NUM_BUFFERS)},
-                     used{} {
+    ReceiveHeader() : buffers{std::make_unique<u8[]>(BUFFER_SIZE * ReceiveHeader::NUM_BUFFERS)},
+                      used{} {
 
-        for(int i = 0; i < NUM_BUFFERS; ++i) {
+        for (int i = 0; i < NUM_BUFFERS; ++i) {
             vecs[i].iov_base = buffers.get() + i * BUFFER_SIZE;
             vecs[i].iov_len = BUFFER_SIZE;
         }
@@ -315,8 +317,8 @@ struct ReceiveHeader {
         hdr.msg_iovlen = NUM_BUFFERS;
         hdr.msg_flags = 0;
     }
-    void prepareRecv(IOUringState& ioState, int mdFD) {
 
+    void prepareRecv(IOUringState &ioState, int mdFD) {
         assert(used.all() || !used.any());
         used.reset();
 
@@ -346,7 +348,7 @@ struct ReceiveHeader {
         assert(recvSqe->user_data == RECV_TAG);
     }
 
-    u8* complete(io_uring_cqe& completion) {
+    u8 *complete(io_uring_cqe &completion) {
         u32 bufferIx = completion.flags >> (sizeof(completion.flags) * 8 - 16);
         assert(bufferIx < ReceiveHeader::NUM_BUFFERS);
         assert(!used.test(bufferIx));
@@ -365,7 +367,7 @@ struct ReceiveHeader {
         assert(receivedLen == datagramLen);
 
         u8 *payload = static_cast<u8 *>(io_uring_recvmsg_payload(out, &hdr));
-        
+
         return payload;
     }
 
@@ -414,8 +416,17 @@ public:
 
         struct sockaddr_in addr{};
         addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1"); // Receive from any address
+        addr.sin_addr.s_addr = htonl(INADDR_ANY); // inet_addr("127.0.0.1"); // Receive from any address
         addr.sin_port = htons(MCAST_PORT);
+
+        ip_mreq mreq{};
+        mreq.imr_multiaddr.s_addr = inet_addr(MCAST_ADDR.c_str());
+        mreq.imr_interface.s_addr = inet_addr("192.168.100.1"); // htonl(INADDR_ANY);
+        if (setsockopt(mdFD, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
+            perror("Membership join");
+            close(mdFD);
+            exit(EXIT_FAILURE);
+        }
 
         // Bind to receive address
         if (bind(mdFD, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
@@ -424,14 +435,7 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        ip_mreq mreq{};
-        mreq.imr_multiaddr.s_addr = inet_addr(MCAST_ADDR.c_str());
-        mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-        if (setsockopt(mdFD, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
-            perror("Membership join");
-            close(mdFD);
-            exit(EXIT_FAILURE);
-        }
+
 
     }
 
@@ -530,7 +534,7 @@ public:
 
                     if (qty > 0) {
                         static bool isSnapshotting = false;
-                        if(!isSnapshotting && isSnapshot) {
+                        if (!isSnapshotting && isSnapshot) {
                             ob.clear();
                         }
                         isSnapshotting = isSnapshot;
@@ -673,21 +677,21 @@ public:
                 }
                 case StrategyState::OE_CONNECT: {
                     assert(io_uring_sq_ready(&ioState.ring) == 0);
-                    
-                    if(int ready = io_uring_cq_ready(&ioState.ring) != 0) {
+
+                    if (int ready = io_uring_cq_ready(&ioState.ring) != 0) {
                         assert(ready == 1);
                         io_uring_cqe *entries;
-                        if(io_uring_wait_cqe_nr(&ioState.ring, &entries, 1) == 0) {
+                        if (io_uring_wait_cqe_nr(&ioState.ring, &entries, 1) == 0) {
                             io_uring_cqe &cqe = entries[0];
                             assert(cqe.res < 0);
                             assert(io_uring_cqe_get_data64(&cqe) == ReceiveHeader::RECV_TAG);
-                            cout << "RECVMSG invalid (" << -cqe.res << ") " << strerror(-cqe.res) <<  endl;
+                            cout << "RECVMSG invalid (" << -cqe.res << ") " << strerror(-cqe.res) << endl;
                             exit(EXIT_FAILURE);
                         } else {
                             perror("Failed to request in error condition");
                             exit(EXIT_FAILURE);
                         }
-                        
+
                     }
 
                     oe.establishConnection();

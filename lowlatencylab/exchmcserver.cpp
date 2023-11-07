@@ -4,6 +4,7 @@
 
 #include "defs.h"
 
+#include <memory>
 #include <unordered_map>
 #include <iostream>
 #include <fstream>
@@ -56,11 +57,16 @@ struct LabResult {
 
 class MDServer {
 public:
+
+    using gzip_streambuf = boost::iostreams::filtering_streambuf<boost::iostreams::input>;
+
     static constexpr int MD_SEND_TAG = 3;
     static constexpr int SND_BUF_SZ = 1 << 16;
     static constexpr int SND_BUF_HIGH_WATERMARK = int(SND_BUF_SZ * 0.7);
 
     const string headerLine;
+
+    bool alive = false;
 
     std::unique_ptr<u8[]> buffer;
     u64 sentBytes = 0;
@@ -73,8 +79,8 @@ public:
     MDMsgId cursor = 0;
 
     std::ifstream &ifile;
-    boost::iostreams::filtering_streambuf<boost::iostreams::input> inbuf;
-    std::istream instream;
+    std::unique_ptr<gzip_streambuf> inbuf = nullptr;
+    std::unique_ptr<std::istream> instream = nullptr;
 
     std::unordered_map<MDMsgId, TimeNs> eventTimeMp;
 
@@ -82,8 +88,6 @@ public:
             headerLine{std::move(headerLine)},
             ioState{ioState},
             ifile{ifile},
-            inbuf{},
-            instream{&inbuf},
             buffer{std::make_unique<u8[]>(SND_BUF_SZ)} {
 
         // Create a socket for sending to a multicast address
@@ -186,7 +190,7 @@ public:
 
     void prepBuffer() {
         assert(serverFD != -1);
-        assert(!instream.eof());
+        assert(!instream->eof());
 
         assert(io_uring_sq_space_left(&ioState.ring) > 1);
         assert(io_uring_cq_ready(&ioState.ring) < ioState.ring.cq.ring_entries - 2);
@@ -198,8 +202,8 @@ public:
             u8 *bufStart = buffer.get();
             u8 *bufPos = bufStart;
             string line;
-            for (int i = 0; i < 5 && !instream.eof(); ++i) {
-                std::getline(instream, line);
+            for (int i = 0; i < 5 && !instream->eof(); ++i) {
+                std::getline(*instream, line);
                 if (!line.empty()) {
                     fillMDPacket(bufPos, bufLen, timeNow, line);
                 } else {
@@ -207,9 +211,10 @@ public:
                     terminationPacket.flags.isTerm = true;
                     bufPos += sizeof(MDPacket);
                     bufLen += sizeof(MDPacket);
-                    assert(instream.eof());
+                    assert(instream->eof());
                 }
             }
+            alive = alive && !instream->eof();
 
             assert(bufLen < SND_BUF_SZ && bufLen > 0);
             io_uring_sqe *mdSqe = ioState.getSqe(MD_SEND_TAG + sentBytes);
@@ -222,29 +227,34 @@ public:
             io_uring_prep_sendto(mdSqe, serverFD, bufStart, bufLen, flags,
                                  (const struct sockaddr *) &multicast_sockaddr,
                                  sizeof(multicast_sockaddr));
+
         }
 
     }
 
     void reset() {
+
+        inbuf = std::make_unique<gzip_streambuf>();
+        instream = std::make_unique<std::istream>(inbuf.get());
+
+        assert(inbuf.get() != nullptr);
+        assert(instream.get() != nullptr);
+
         cursor = 0;
 
-        if (!inbuf.empty()) {
-            assert(inbuf.size() == 2);
-            inbuf.pop();
-            inbuf.pop();
-        }
         ifile.clear();
         ifile.seekg(0);
         assert(ifile.tellg() == 0);
-        inbuf.push(boost::iostreams::gzip_decompressor());
-        inbuf.push(ifile);
-        instream.clear();
-        instream.rdbuf(&inbuf);
+
+        inbuf->push(boost::iostreams::gzip_decompressor());
+        inbuf->push(ifile);
 
         string header;
-        std::getline(instream, header);
-        assert(header == headerLine);
+        std::getline(*instream, header);
+        auto pos = header.rfind(headerLine);
+        assert(pos == header.size() - headerLine.size());
+
+        alive = true;
 
         sentBytes = 0;
         ackedBytes = 0;
@@ -253,7 +263,7 @@ public:
     }
 
     bool isAlive() const {
-        return !instream.eof();
+        return alive;
     }
 
     TimeNs eventTime(MDMsgId id) const {
@@ -266,7 +276,7 @@ public:
         return eventTimeMp.find(id) != eventTimeMp.end();
     }
 
-    void completeMessage(u64 userData, int bytesWrtten) {
+    void completeMessage(u64 userData, int bytesWrtten, bool clientConnected) {
         assert(userData >= MD_SEND_TAG);
         u64 ackByte = userData - MD_SEND_TAG + bytesWrtten;
         assert(bytesWrtten > 0);
@@ -277,6 +287,9 @@ public:
         if (ackByte > ackedBytes) {
             ackedBytes = ackByte;
         }
+
+        alive = alive && clientConnected && ackedBytes < sentBytes;
+
     }
 
     void throttle(u64 userData) const {
@@ -378,7 +391,6 @@ public:
         assert(clientFD == -1);
         assert(!isAlive);
         assert(clientAddrSz > 0);
-        assert(clientAddr.sin_addr.s_addr == 0);
         assert(curLabResult.seenOrders.empty());
         assert(curLabResult.connectionTime == 0);
         assert(curLabResult.disconnectTime == 0);
@@ -479,11 +491,11 @@ public:
         assert(userData == RECV_TAG);
         int returnCode = completion.res;
         assert(returnCode > 0 || returnCode != EBADF);
-        assert(completion.flags & IORING_CQE_F_BUFFER);
         assert(!multishotDone || ((completion.flags & IORING_CQE_F_MORE) == 0));
         multishotDone = multishotDone || ((completion.flags & IORING_CQE_F_MORE) == 0);
         assert(isAlive || returnCode >= 0 || returnCode == EBADF);
         isAlive = isAlive && returnCode > 0;
+        assert(!isAlive || completion.flags & IORING_CQE_F_BUFFER);
 
         if (isAlive) {
             u32 bufferIx = completion.flags >> (sizeof(completion.flags) * 8 - 16);
@@ -499,10 +511,12 @@ public:
             assert(endBuf == buf + sizeof(Order) * numMessages);
 
             used.set(bufferIx);
+        } else {
+            reset();
         }
 
-        assert(curLabResult.seenOrders.size() > ogLabResSize);
-        assert(io_uring_cq_ready(&ioState.ring) == 0);
+        assert(!isAlive || curLabResult.seenOrders.size() > ogLabResSize);
+        assert(!isAlive || io_uring_cq_ready(&ioState.ring) == 0);
         assert(io_uring_sq_ready(&ioState.ring) == 0);
 
         if (multishotDone && isAlive) {
@@ -592,8 +606,7 @@ public:
                     // check for received messages from order entry and enqueue more reads
                     // write out marketdata
 
-                    if (!oe.connectionAlive() || !md.isAlive()) {
-                        oe.reset();
+                    if (!oe.connectionAlive() && !md.isAlive()) {
                         md.reset();
                         io_uring_submit(&ioState.ring);
                         assert(io_uring_sq_ready(&ioState.ring) == 0);
@@ -618,7 +631,7 @@ public:
                                            userData <= MDServer::MD_SEND_TAG + md.sentBytes) {
                                     int resultCode = e.res;
                                     if (resultCode > 0) {
-                                        md.completeMessage(userData, resultCode);
+                                        md.completeMessage(userData, resultCode, oe.connectionAlive());
                                     } else if (resultCode == EAGAIN || resultCode == EALREADY) {
                                         cout << "OS Throttle [" << strerror(-resultCode) << "]. " << endl;
                                         md.throttle(userData);
@@ -636,10 +649,11 @@ public:
                         assert(io_uring_cq_ready(&ioState.ring) == 0);
                         unsigned int pending = io_uring_sq_ready(&ioState.ring);
                         assert(pending <= 1);
-
-                        md.prepBuffer();
-                        if (io_uring_sq_ready(&ioState.ring) > 0) {
-                            io_uring_submit(&ioState.ring);
+                        if (md.isAlive()) {
+                            md.prepBuffer();
+                            if (io_uring_sq_ready(&ioState.ring) > 0) {
+                                io_uring_submit(&ioState.ring);
+                            }
                         }
                     }
 
@@ -663,7 +677,6 @@ private:
         assert(ioState == md.ioState);
         assert(io_uring_sq_space_left(&ioState.ring) > 0);
 
-
         assert(oe.isAlive == (oe.clientFD != -1));
         assert(md.sentBytes >= md.ackedBytes);
         assert(md.sentBytes < (1 << 10) || md.sentBytes * 0.1 <= md.ackedBytes ||
@@ -674,7 +687,7 @@ private:
             case ExchangeState::INIT: {
                 assert(io_uring_cq_ready(&ioState.ring) == 0);
 
-                assert(ioState.ring.sq.sqe_tail - ioState.ring.sq.sqe_head == 1);
+                assert(ioState.ring.sq.sqe_tail - ioState.ring.sq.sqe_head == 0);
 
                 assert(oe.clientFD == -1);
                 assert(oe.connectionSeen == 0 || oe.serverFD != -1);
@@ -682,8 +695,8 @@ private:
 
                 assert(oe.connectionSeen == 0 || md.serverFD != -1);
                 assert(md.cursor == 0);
-                md.instream.get();
-                assert(md.instream.fail());
+                md.instream->peek();
+                assert(!md.instream->fail());
 
                 break;
             }
@@ -699,8 +712,6 @@ private:
             }
             case ExchangeState::TRANSMIT: {
                 assert(ioState.ring.sq.sqe_tail - ioState.ring.sq.sqe_tail <= 4);
-
-                oeHandshakeState();
 
                 assert(md.serverFD != -1);
                 bool mdIssued = md.cursor > 0;
@@ -729,7 +740,6 @@ private:
         assert(oe.connectionSeen > 0);
         assert(oe.curLabResult.connectionTime > 0);
         assert(oe.curLabResult.seenOrders.empty());
-        assert(oe.curLabResult.disconnectTime == 0);
 
     }
 };
