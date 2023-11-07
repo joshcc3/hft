@@ -5,6 +5,12 @@
 #ifndef TICTACTOE_DEFS_H
 #define TICTACTOE_DEFS_H
 
+
+#include <openssl/sha.h>
+#include <iostream>
+#include <iomanip>
+#include <cstring>
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -14,6 +20,7 @@
 #include <chrono>
 #include <cassert>
 #include <iostream>
+#include <unordered_map>
 
 using std::cerr;
 using std::endl;
@@ -34,6 +41,16 @@ using OrderId = u64;
 using MDMsgId = SeqNo;
 
 using TimeNs = i64;
+
+constexpr static int PINNED_CPU = 0;
+
+inline u64 __attribute__((always_inline)) rotl(u64 a, u32 n) {
+    return (a << n) | (a >> (64 - n));
+}
+
+inline u64 __attribute__((always_inline)) rotr(u64 a, u32 n) {
+    return (a >> n) | (a << (64 - n));
+}
 
 enum Side {
     BUY,
@@ -86,12 +103,16 @@ inline TimeNs currentTimeNs() {
 
 struct IOUringState {
 
-    static constexpr int QUEUE_DEPTH = 1 << 8;
+    static constexpr int QUEUE_DEPTH = 1 << 10;
 
     struct io_uring ring{};
 
     IOUringState() {
-        struct io_uring_params params{.flags = IORING_SETUP_SINGLE_ISSUER};
+        struct io_uring_params params{
+                .sq_entries = QUEUE_DEPTH,
+                .cq_entries = QUEUE_DEPTH * 2,
+                .flags = IORING_SETUP_SINGLE_ISSUER
+        };
         if (int error = io_uring_queue_init_params(QUEUE_DEPTH, &ring, &params) < 0) {
             cerr << "Queue init failed [" << error << "]." << endl;
             throw std::runtime_error("Unable to setup io_uring queue");
@@ -112,6 +133,7 @@ struct IOUringState {
     }
 
     [[nodiscard]] io_uring_sqe *getSqe(u64 tag) {
+        assert(tag < (u64(1) << 31));
         io_uring_sqe *sqe = io_uring_get_sqe(&ring);
         assert(nullptr != sqe);
         io_uring_sqe_set_data64(sqe, tag);
@@ -125,12 +147,18 @@ struct IOUringState {
         return submitted;
     }
 
+    int submitAndWait(int n) {
+        return io_uring_submit_and_wait(&ring, n);
+    }
+
     io_uring_cqe *popCqe() {
         io_uring_cqe *cqe;
+        // TODO: I get interrupts here - un sure why
         int res = io_uring_wait_cqe(&ring, &cqe);
         assert(res == 0);
         u64 tag = io_uring_cqe_get_data64(cqe);
         assert(tag >= 0);
+
         return cqe;
     }
 };
@@ -147,7 +175,7 @@ struct MDPacket {
     PriceL price = 0;
     Qty qty = 0;
     MDFlags flags{.isTerm = true};
-    char _padding[3]{};
+    char _padding[7]{};
 
     MDPacket() = default;
 
@@ -156,7 +184,7 @@ struct MDPacket {
                                                                                          price{price}, qty{qty},
                                                                                          flags{flags}, _padding{} {}
 
-    MDPacket(const MDPacket& other) = default;
+    MDPacket(const MDPacket &other) = default;
 
 };
 
@@ -251,5 +279,19 @@ parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localTimestamp, b
     qty = _qty;
     return matched;
 }
+
+
+inline bool checkMessageDigest(const u8 * buf, ssize_t bytes) {
+    static std::unordered_map<int, MDPacket> seenHashes{};
+
+
+    const MDPacket& p = *reinterpret_cast<const MDPacket*>(buf);
+
+    const auto&[e, inserted] = seenHashes.emplace(p.seqNo, p);
+
+    assert(inserted);
+    return true;
+}
+
 
 #endif //TICTACTOE_DEFS_H

@@ -9,14 +9,14 @@ set(CMAKE_CXX_STANDARD 17)
 find_package(Boost 1.78.0 COMPONENTS iostreams REQUIRED)
 
 add_executable(lll_exchange
-        lowlatencylab/exchmcserver.cpp
-        lowlatencylab/exchmcserver.h)
+        lowlatencylab/server/exchmcserver.cpp
+        lowlatencylab/server/exchmcserver.h)
 
 add_executable(lll_strategy
-        lowlatencylab/mdmcclient.cpp
-        lowlatencylab/mdmcclient.h
-        lowlatencylab/L2OB.cpp
-        lowlatencylab/L2OB.h
+        lowlatencylab/client/mdmcclient.cpp
+        lowlatencylab/client/mdmcclient.h
+        lowlatencylab/client/L2OB.cpp
+        lowlatencylab/client/L2OB.h
         lowlatencylab/defs.h
 )
 
@@ -51,10 +51,6 @@ add_executable(obtester
         cubist/L3OrderBook.h
         cubist/L3LevelAlloc.h
         cubist/L3LevelAlloc.cpp
-)
-
-add_executable(tictactoe
-        networking/tictactoegames.cpp
 )
 
 target_link_libraries(networking uring)

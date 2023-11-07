@@ -1,7 +1,7 @@
 #ifndef HFT_RING_BUFFER_H
 #define HFT_RING_BUFFER_H
 
-#define NDEBUG
+//#define NDEBUG
 
 
 #include <cstddef>
@@ -21,6 +21,7 @@ template<typename T, std::size_t Capacity>
 class RingBuffer {
 public:
 
+    static_assert(__builtin_popcount(Capacity) == 1);
     RingBuffer() : data{static_cast<T *>(malloc(sizeof(T) * Capacity))}, head{0}, tail{0} {
         if (data == NULL) {
             throw std::bad_alloc();
@@ -60,6 +61,10 @@ public:
         assert(check());
 
         return data[head];
+    }
+
+    const T& get(int i) const {
+        return data[(head + i) & (Capacity - 1)];
     }
 
     void pop() {
