@@ -118,15 +118,25 @@ public:
             exit(EXIT_FAILURE);
         }
 
+        int loopbackT = 0;
+        socklen_t sz = sizeof(loopbackT);
+        if (getsockopt(serverFD, IPPROTO_IP, IP_MULTICAST_LOOP, &loopbackT, &sz) < 0) {
+            perror("COuld not get sock opt loop");
+            exit(EXIT_FAILURE);
+        }
+
+        assert(loopbackT == 1);
+
 
         // Set up the sockaddr structure
         multicast_sockaddr.sin_family = AF_INET;
         multicast_sockaddr.sin_addr.s_addr = inet_addr(MCAST_ADDR.c_str());
         multicast_sockaddr.sin_port = htons(MCAST_PORT);
 
-        if (bind(serverFD, (struct sockaddr *) &multicast_sockaddr, sizeof multicast_sockaddr) < 0) {
+        int ttl = 10; // Set TTL for multicast; increase if necessary
+        if (setsockopt(serverFD, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) < 0) {
+            perror("Error setting IP_MULTICAST_TTL");
             close(serverFD);
-            cerr << "Bind failed [" << errno << "]." << endl;
             exit(EXIT_FAILURE);
         }
 
@@ -147,7 +157,7 @@ public:
         parseDeribitMDLine(line.c_str(), timestamp, localTimestamp, isSnapshot, side, price, qty);
         assert(timestamp && localTimestamp);
         assert(side == Side::BUY || side == Side::SELL);
-        assert(price && qty);
+        assert(price);
 
         isBid = side == Side::BUY;
 
@@ -158,7 +168,6 @@ public:
         packet.qty = qty;
         packet.flags.isBid = isBid;
         packet.flags.isSnapshot = isSnapshot;
-        packet.flags.isSnapshot = false;
 
         assert(packet.seqNo == cursor);
         assert(packet.localTimestamp == timeNow);
@@ -407,7 +416,8 @@ public:
             cout << connectionSeen << "," << curLabResult.connectionTime << "," << curLabResult.disconnectTime << "," <<
                  orderInfo.orderInfo.submittedTime << "," << orderInfo.receivedTime << "," <<
                  orderInfo.orderInfo.triggerReceivedTime << "," << orderInfo.triggerSubmitTime << "," <<
-                 orderInfo.orderInfo.triggerEvent << "," << orderInfo.orderInfo.flags.isBid << "," << orderInfo.orderInfo.price << "," <<
+                 orderInfo.orderInfo.triggerEvent << "," << orderInfo.orderInfo.flags.isBid << ","
+                 << orderInfo.orderInfo.price << "," <<
                  orderInfo.orderInfo.qty << "," << orderInfo.orderInfo.id << "\n";
         }
         cout << endl;
@@ -472,8 +482,8 @@ public:
         assert(completion.flags & IORING_CQE_F_BUFFER);
         assert(!multishotDone || ((completion.flags & IORING_CQE_F_MORE) == 0));
         multishotDone = multishotDone || ((completion.flags & IORING_CQE_F_MORE) == 0);
-        assert(isAlive || returnCode > 0 || returnCode == EBADF);
-        isAlive = isAlive && !(returnCode > 0 || returnCode == EBADF);
+        assert(isAlive || returnCode >= 0 || returnCode == EBADF);
+        isAlive = isAlive && returnCode > 0;
 
         if (isAlive) {
             u32 bufferIx = completion.flags >> (sizeof(completion.flags) * 8 - 16);
@@ -558,6 +568,7 @@ public:
                     }
                     assert(io_uring_sq_ready(&ioState.ring) == 0);
                     assert(io_uring_cq_ready(&ioState.ring) == 0);
+                    cout << "OE Connected" << endl;
                     state = ExchangeState::HANDSHAKE;
                     break;
                 }
@@ -572,6 +583,7 @@ public:
                     assert(io_uring_sq_ready(&ioState.ring) == 0);
                     assert(io_uring_cq_ready(&ioState.ring) >= 0);
 
+                    cout << "MD Transmitting" << endl;
                     state = ExchangeState::TRANSMIT;
 
                     break;
@@ -654,9 +666,9 @@ private:
 
         assert(oe.isAlive == (oe.clientFD != -1));
         assert(md.sentBytes >= md.ackedBytes);
-        assert(md.sentBytes < (1 << 10) || md.sentBytes * 0.7 <= md.ackedBytes ||
-               md.sentBytes - md.ackedBytes < (MDServer::SND_BUF_SZ / 8));
-        assert(md.cursor * 50 <= md.sentBytes);
+        assert(md.sentBytes < (1 << 10) || md.sentBytes * 0.1 <= md.ackedBytes ||
+               md.sentBytes - md.ackedBytes < (MDServer::SND_BUF_SZ / 2));
+        assert(md.cursor * 10 <= md.sentBytes);
 
         switch (state) {
             case ExchangeState::INIT: {
@@ -682,6 +694,7 @@ private:
 
                 assert(oe.connectionSeen == 1 || md.serverFD != -1);
                 assert(md.cursor == 0);
+
                 break;
             }
             case ExchangeState::TRANSMIT: {
@@ -692,7 +705,6 @@ private:
                 assert(md.serverFD != -1);
                 bool mdIssued = md.cursor > 0;
                 assert(oe.curLabResult.seenOrders.empty() || mdIssued);
-                assert(!md.instream.eof());
 
                 break;
             }

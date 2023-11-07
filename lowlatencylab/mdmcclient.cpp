@@ -66,7 +66,7 @@ public:
         assert(io_uring_sq_ready(&ioState.ring) == 0);
         assert(io_uring_cq_ready(&ioState.ring) == 0);
 
-        clientFD = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+        clientFD = socket(AF_INET, SOCK_STREAM, 0);
         if (clientFD == -1) {
             cerr << "Could not create oe server [" << errno << "]" << endl;
             exit(EXIT_FAILURE);
@@ -124,8 +124,11 @@ public:
         serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
         serverAddr.sin_port = htons(OE_PORT);
 
-        if (connect(clientFD, (struct sockaddr *) &serverAddr, sizeof(serverAddr)) < 0) {
-            throw std::runtime_error("Bind failed");
+        if (int res = connect(clientFD, (struct sockaddr *) &serverAddr, sizeof(serverAddr))) {
+            perror("Bind to server socket failed.");
+            cerr <<
+            close(clientFD);
+            exit(EXIT_FAILURE);
         }
 
     }
@@ -312,7 +315,37 @@ struct ReceiveHeader {
         hdr.msg_iovlen = NUM_BUFFERS;
         hdr.msg_flags = 0;
     }
-    
+    void prepareRecv(IOUringState& ioState, int mdFD) {
+
+        assert(used.all() || !used.any());
+        used.reset();
+
+        io_uring_sqe *bufferSqe = ioState.getSqe(BUFFER_TAG);
+        io_uring_prep_provide_buffers(bufferSqe, buffers.get(), BUFFER_SIZE, ReceiveHeader::NUM_BUFFERS, GROUP_ID, 0);
+        assert(io_uring_sq_ready(&ioState.ring) == 1);
+        int completed = io_uring_submit_and_wait(&ioState.ring, 1);
+        assert(completed == 1);
+        assert(io_uring_sq_ready(&ioState.ring) == 0);
+        {
+            cqe_guard g{ioState};
+            assert(g.completion->res == ReceiveHeader::NUM_BUFFERS || g.completion->res == 0);
+            assert((io_uring_cqe_get_data64(g.completion)) == BUFFER_TAG);
+
+        }
+
+        assert(mdFD != -1);
+        io_uring_sqe *recvSqe = ioState.getSqe(RECV_TAG);
+        io_uring_prep_recvmsg_multishot(recvSqe, 0, &hdr,  MSG_TRUNC); // Use mdFD
+        int ogFlags = recvSqe->flags;
+        recvSqe->flags |= IOSQE_BUFFER_SELECT | IOSQE_FIXED_FILE;
+        assert(recvSqe->flags == (ogFlags | IOSQE_BUFFER_SELECT | IOSQE_FIXED_FILE));
+
+        assert(recvSqe->opcode == IORING_OP_RECVMSG);
+        assert((recvSqe->fd == 0) == (recvSqe->flags & IOSQE_FIXED_FILE));
+        assert(recvSqe->off == 0);
+        assert(recvSqe->user_data == RECV_TAG);
+    }
+
     u8* complete(io_uring_cqe& completion) {
         u32 bufferIx = completion.flags >> (sizeof(completion.flags) * 8 - 16);
         assert(bufferIx < ReceiveHeader::NUM_BUFFERS);
@@ -336,36 +369,7 @@ struct ReceiveHeader {
         return payload;
     }
 
-    void prepareRecv(IOUringState& ioState, int mdFD) {
-        assert(used.all() || !used.any());
-        used.reset();
 
-        io_uring_sqe *bufferSqe = ioState.getSqe(BUFFER_TAG);
-        io_uring_prep_provide_buffers(bufferSqe, buffers.get(), BUFFER_SIZE, ReceiveHeader::NUM_BUFFERS, GROUP_ID, 0);
-        assert(io_uring_sq_ready(&ioState.ring) == 1);
-        int completed = io_uring_submit_and_wait(&ioState.ring, 1);
-        assert(completed == 1);
-        assert(io_uring_sq_ready(&ioState.ring) == 0);
-        {
-            cqe_guard g{ioState};
-            assert(g.completion->res == ReceiveHeader::NUM_BUFFERS || g.completion->res == 0);
-            assert((io_uring_cqe_get_data64(g.completion)) == BUFFER_TAG);
-
-        }
-
-        assert(mdFD != -1);
-        io_uring_sqe *recvSqe = ioState.getSqe(RECV_TAG);
-        io_uring_prep_recvmsg_multishot(recvSqe, 0, &hdr, MSG_TRUNC); // Use mdFD
-        int ogFlags = recvSqe->flags;
-        recvSqe->flags |= IOSQE_BUFFER_SELECT | IOSQE_FIXED_FILE;
-        assert(recvSqe->flags == (ogFlags | IOSQE_BUFFER_SELECT | IOSQE_FIXED_FILE));
-
-        assert(recvSqe->opcode == IORING_OP_RECVMSG);
-        assert(recvSqe->fd == 0);
-        assert(recvSqe->off == 0);
-        assert(recvSqe->flags == (IOSQE_BUFFER_SELECT | IOSQE_FIXED_FILE));
-        assert(recvSqe->user_data == RECV_TAG);
-    }
 };
 
 class Strat {
@@ -410,7 +414,7 @@ public:
 
         struct sockaddr_in addr{};
         addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_ANY); // Receive from any address
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1"); // Receive from any address
         addr.sin_port = htons(MCAST_PORT);
 
         // Bind to receive address
@@ -677,7 +681,7 @@ public:
                             io_uring_cqe &cqe = entries[0];
                             assert(cqe.res < 0);
                             assert(io_uring_cqe_get_data64(&cqe) == ReceiveHeader::RECV_TAG);
-                            cout << "Invalid request (" << -cqe.res << ") " << strerror(-cqe.res) <<  endl;
+                            cout << "RECVMSG invalid (" << -cqe.res << ") " << strerror(-cqe.res) <<  endl;
                             exit(EXIT_FAILURE);
                         } else {
                             perror("Failed to request in error condition");
