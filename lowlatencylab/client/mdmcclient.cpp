@@ -76,6 +76,13 @@ public:
                     CLOCK(
                             int i = 0;
                             strat.recvUdpMD();
+                            static int counter1 = 0;
+                            ++counter1;
+                            if((++counter1 & 0x1fff) == 0) {
+                                cout << "Book update [" << timeSpent[1] / timeSpent[0] * 100 << "%]" << endl;
+                                cout << "Order Submission [" << timeSpent[2] / timeSpent[0] * 100 << "%]" << endl;
+                                cout << "Message Handling [" << timeSpent[3] / timeSpent[0] * 100 << "%]" << endl;
+                            }
                     )
                     assert(std::abs(currentTimeNs() - strat.lastReceivedNs) < 1'000'000);
 

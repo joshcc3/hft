@@ -69,10 +69,16 @@ public:
 
     LabResult curLabResult{};
 
+    std::ofstream file_out;
 
-    OEServer(IOUringState &ioState, const MDServer &md) : ioState{ioState}, md{md}, isAlive{false},
-                                                          buffers{std::make_unique<char[]>(BUFFER_SIZE * NUM_BUFFERS)},
-                                                          used{} {
+
+    OEServer(IOUringState &ioState, const MDServer &md, const std::string &outFileName) : ioState{ioState}, md{md},
+                                                                                          isAlive{false},
+                                                                                          buffers{std::make_unique<char[]>(
+                                                                                                  BUFFER_SIZE *
+                                                                                                  NUM_BUFFERS)},
+                                                                                          used{},
+                                                                                          file_out{outFileName} {
 
         serverFD = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
         if (serverFD == -1) {
@@ -114,6 +120,13 @@ public:
         if (listen(serverFD, 1) < 0) {
             throw std::runtime_error("listen(serverDF, 1) failed");
         }
+
+        if (!file_out.is_open()) {
+            std::cerr << "Could not open the file " << outFileName << " for writing." << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        file_out << "connectionSeen,connectionTime,curLabResult.disconnectTime,orderInfo.orderInfo.submittedTime,orderInfo.receivedTime,orderInfo.triggerReceivedTime,orderInfo.triggerSubmitTime,orderInfo.orderInfo.triggerEvent,orderInfo.orderInfo.flags.isBid,orderInfo.orderInfo.price,orderInfo.orderInfo.qty,orderInfo.id\n";
 
         reset();
 
@@ -164,16 +177,18 @@ public:
         used.reset();
         curLabResult.disconnectTime = currentTimeNs();
 
+
         for (const auto &orderInfo: curLabResult.seenOrders) {
 
-            cout << connectionSeen << "," << curLabResult.connectionTime << "," << curLabResult.disconnectTime << "," <<
-                 orderInfo.orderInfo.submittedTime << "," << orderInfo.receivedTime << "," <<
-                 orderInfo.orderInfo.triggerReceivedTime << "," << orderInfo.triggerSubmitTime << "," <<
-                 orderInfo.orderInfo.triggerEvent << "," << orderInfo.orderInfo.flags.isBid << ","
-                 << orderInfo.orderInfo.price << "," <<
-                 orderInfo.orderInfo.qty << "," << orderInfo.orderInfo.id << "\n";
+            file_out << connectionSeen << "," << curLabResult.connectionTime << "," << curLabResult.disconnectTime
+                     << "," <<
+                     orderInfo.orderInfo.submittedTime << "," << orderInfo.receivedTime << "," <<
+                     orderInfo.orderInfo.triggerReceivedTime << "," << orderInfo.triggerSubmitTime << "," <<
+                     orderInfo.orderInfo.triggerEvent << "," << orderInfo.orderInfo.flags.isBid << ","
+                     << orderInfo.orderInfo.price << "," <<
+                     orderInfo.orderInfo.qty << "," << orderInfo.orderInfo.id << "\n";
         }
-        cout << endl;
+        file_out.flush();
         if (clientFD != -1) {
             close(clientFD);
             clientFD = -1;

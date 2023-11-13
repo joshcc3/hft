@@ -118,7 +118,7 @@ public:
 
         if (connect(clientFD, (struct sockaddr *) &serverAddr, sizeof(serverAddr)) < 0) {
             perror("Bind to server socket failed.");
-             close(clientFD);
+            close(clientFD);
             exit(EXIT_FAILURE);
         }
 
@@ -199,17 +199,17 @@ public:
 
         OrderId receivedId = cUserData - ORDER_TAG;
 
-        if(receivedId == curOrder.id) {
+        if (receivedId == curOrder.id) {
             assert(cRes > 0);
             assert(!(cFlags & IORING_CQE_F_BUFFER));
             assert(!(cFlags & IORING_CQE_F_NOTIF));
             assert(cRes > 0 || -cRes != EBADF);
 
-            cout << "Order Id [" << curOrder.id << "]." << '\n';
-            cout << "Order Latency Time [" << double(curTime - curOrder.triggerReceivedTime) / 1000.0 << "us]." << '\n';
-            cout << "Order Ack Time [" << double(curTime - curOrder.submittedTime) / 1000.0 << "us]." << '\n';
+            // id, latency time,
+//            cout << curOrder.id << "," << double(curTime - curOrder.triggerReceivedTime) / 1000.0 << ","
+//                 << double(curTime - curOrder.submittedTime) / 1000.0 << '\n';
         } else {
-            cout << "Skipping [" << receivedId << "]." << '\n';
+//            cout << "Skipping [" << receivedId << "]." << '\n';
         }
     }
 };

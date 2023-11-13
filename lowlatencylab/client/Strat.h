@@ -170,7 +170,6 @@ public:
         for (int i = 0; i < numPackets; ++i) {
 
             const MDPacket &packet = *reinterpret_cast<const MDPacket *>(finalBufPos);
-            cout << packet.seqNo << '\n';
             TimeNs timeDelay = currentTimeNs() - packet.localTimestamp;
             assert(timeDelay <= 5'000'000'000);
             assert(packet.seqNo >= 0 || packet.flags.isTerm);

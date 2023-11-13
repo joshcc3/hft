@@ -38,8 +38,9 @@ class Exchange {
 
 
 public:
-    Exchange(std::ifstream &f, const string &headerLine) : state(ExchangeState::INIT), ioState(), oe{ioState, md},
-                                                           md{ioState, f, headerLine} {
+    Exchange(std::ifstream &f, const string &headerLine, const string &outputFileN)
+            : state(ExchangeState::INIT), ioState(), oe{ioState, md, outputFileN},
+              md{ioState, f, headerLine} {
         assert(io_uring_sq_ready(&ioState.ring) == 0);
     }
 
@@ -232,6 +233,7 @@ private:
 };
 
 int main() {
+    const string &ofname = "/home/jc/CLionProjects/hft/data/trades.csv";
     const string &fname = "/home/jc/CLionProjects/hft/data/deribit_incremental_book_L2_2020-04-01_BTC-PERPETUAL.csv.gz";
     std::ifstream ifile(fname, std::ios_base::in | std::ios_base::binary);
     if (!ifile) {
@@ -240,6 +242,6 @@ int main() {
     }
     const string headerLine = "exchange,symbol,timestamp,local_timestamp,is_snapshot,side,price,amount";
 
-    Exchange exchange{ifile, headerLine};
+    Exchange exchange{ifile, headerLine, ofname};
     exchange.run();
 }
