@@ -136,11 +136,17 @@ public:
                 if (notionalChange > TRADE_THRESHOLD) {
                     PriceL tradePrice = oppSidePrice;
                     OrderFlags flags{.isBid = !isBid};
-                    orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
+                    CLOCK(
+                            int i = 2;
+                            orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
+                    )
                 } else if (notionalChange < -TRADE_THRESHOLD) {
                     PriceL tradePrice = sidePrice;
                     OrderFlags flags{.isBid = isBid};
-                    orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
+                    CLOCK(
+                            int i = 2;
+                            orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
+                    )
                 }
             }
         }
@@ -206,6 +212,7 @@ public:
                 }
                 isSnapshotting = isSnapshot;
                 if (p.flags.isBid) {
+
                     checkTrade<Side::BUY>(seqNo, time, isSnapshot, localTimestamp, price, qty);
                 } else {
                     checkTrade<Side::SELL>(seqNo, time, isSnapshot, localTimestamp, price, qty);

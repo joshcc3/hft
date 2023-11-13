@@ -79,9 +79,15 @@ public:
         assert(localTimestamp > 0);
         TopLevel res;
         if (side == Side::BUY) {
-            res = update < Side::BUY > (isSnapshot, bid, ask, localTimestamp, price, qty);
+            CLOCK(
+                int i = 1;
+                  res = update < Side::BUY > (isSnapshot, bid, ask, localTimestamp, price, qty);
+            )
         } else if (side == Side::SELL) {
-            res = update < Side::SELL > (isSnapshot, ask, bid, localTimestamp, price, qty);
+            CLOCK(
+                    int i = 1;
+                    res = update < Side::SELL > (isSnapshot, ask, bid, localTimestamp, price, qty);
+            )
         } else {
             assert(false);
         }
@@ -143,7 +149,6 @@ public:
             }
         };
 
-
         auto it = std::find_if(level.begin(), level.end(), [price](const LevelInfo &l) { return l.price == price; });
         assert(it->price == price && it->levelQty == qty && it->lastUpdated == localTimestamp);
         assert(it == level.begin() || sideComp(*(it - 1)));
@@ -173,7 +178,7 @@ public:
         seen.erase(priceL);
 
         assert(seen.find(priceL) == seen.end());
-        stateChecks();
+        assert(stateChecks());
     }
 
 

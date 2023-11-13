@@ -304,13 +304,13 @@ parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localTimestamp, b
 }
 
 
-inline bool checkMessageDigest(const u8 * buf, ssize_t bytes) {
+inline bool checkMessageDigest(const u8 *buf, ssize_t bytes) {
     static std::unordered_map<int, MDPacket> seenHashes{};
 
 
-    const MDPacket& p = *reinterpret_cast<const MDPacket*>(buf);
+    const MDPacket &p = *reinterpret_cast<const MDPacket *>(buf);
 
-    const auto&[e, inserted] = seenHashes.emplace(p.seqNo, p);
+    const auto &[e, inserted] = seenHashes.emplace(p.seqNo, p);
 
     assert(inserted);
     return true;

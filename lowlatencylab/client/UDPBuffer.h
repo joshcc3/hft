@@ -116,21 +116,20 @@ struct UDPBuffer {
             assert(ringBuffer[bufferPos].localTimestamp == msg.localTimestamp);
 
             if (seqNo == nextMissingSeqNo) {
+
+                int maxFull = 1;
                 MaskType alignedMask = rotr(mask, head);
                 assert(rotl(alignedMask, head) == mask);
                 assert(alignedMask & 1);
-                int maxFull = 1;
                 for (MaskType fullMask = 1;
                      maxFull < Sz && (fullMask & alignedMask) == fullMask;
                      ++maxFull, fullMask = nOnes(maxFull));
-
                 int packetsToProcess = maxFull - 1;
                 for (int j = 0; j < packetsToProcess; ++j) {
                     const MDPacket &p = get(j);
                     packetProcessor(time, p);
                 }
                 advance(packetsToProcess);
-
                 totalPacketsProccessed = packetsToProcess;
 
                 if (!unprocessed.empty() && unprocessed.front().seqNo == nextMissingSeqNo) {
@@ -146,7 +145,11 @@ struct UDPBuffer {
             unprocessed.emplace_back(msg);
             totalPacketsProccessed = 0;
         } else {
-            cout << "Time per iter [" << timeSpent[1] / timeSpent[0] * 100 << "%]" << endl;
+
+            cout << "Book update [" << timeSpent[1] / timeSpent[0] * 100 << "%]" << endl;
+            cout << "Order Submission [" << timeSpent[2] / timeSpent[0] * 100 << "%]" << endl;
+            cout << "Message Handling [" << timeSpent[3] / timeSpent[0] * 100 << "%]" << endl;
+
             throw std::runtime_error("Message gap detected: " + (msg.seqNo - nextMissingSeqNo - Sz));
         }
 
