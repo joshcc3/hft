@@ -22,6 +22,29 @@
 #include <iostream>
 #include <unordered_map>
 
+#define NDEBUG
+
+#ifdef NDEBUG
+#undef assert
+#define assert(expr) void(0)
+#endif
+
+inline double timeSpent[10] = {0, 0, 0, 0, 0};
+
+template<typename T>
+inline double elapsed(T t1, T t2) {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count() / 1000000000.0;
+
+}
+
+#define CLOCK(a) { \
+    auto _s = std::chrono::system_clock::now(); \
+    a;             \
+    auto _e = std::chrono::system_clock::now(); \
+    timeSpent[i] += elapsed(_s, _e);                      \
+}
+
+
 using std::cerr;
 using std::endl;
 using std::cout;

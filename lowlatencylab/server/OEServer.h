@@ -250,7 +250,8 @@ public:
             used.set(bufferIx);
             assert(!isAlive || curLabResult.seenOrders.size() > ogLabResSize);
             assert(io_uring_sq_ready(&ioState.ring) == 0);
-        } else if (returnCode == 0 || returnCode == -EBADF) {
+        } else if (!isAlive) {
+            assert(returnCode == 0 || -returnCode == EBADF);
             reset();
         } else if (-returnCode == ENOBUFS) {
             assert(multishotDone && isAlive);
@@ -261,6 +262,7 @@ public:
         if (multishotDone && isAlive) {
             assert(used.all());
             prepareRecv();
+            ioState.submit();
         }
 
 

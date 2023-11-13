@@ -146,6 +146,7 @@ struct UDPBuffer {
             unprocessed.emplace_back(msg);
             totalPacketsProccessed = 0;
         } else {
+            cout << "Time per iter [" << timeSpent[1] / timeSpent[0] * 100 << "%]" << endl;
             throw std::runtime_error("Message gap detected: " + (msg.seqNo - nextMissingSeqNo - Sz));
         }
 

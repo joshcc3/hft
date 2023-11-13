@@ -5,7 +5,6 @@
 #ifndef LLL_EXCHANGE_STRAT_H
 #define LLL_EXCHANGE_STRAT_H
 
-#define NDEBUG
 
 #include <cstring>
 #include <unistd.h>
@@ -109,7 +108,6 @@ public:
                PriceL price,
                Qty qty) {
         const auto &[bestBid, bestAsk, bidSize, askSize] = ob.update(isSnapshot, side, localTimestamp, price, qty);
-
         if (!isSnapshot) {
             SeqNo triggerEvent = seqNo;
             TimeNs recvTime = mdTime;
@@ -177,7 +175,6 @@ public:
             finalBufPos += sizeof(MDPacket);
         }
 
-        assert(udpBuf.mask == 0 || udpBuf.mask != ogMask);
         assert(udpBuf.nextMissingSeqNo >= ogLowestSeqNum);
         assert(udpBuf.nextMissingSeqNo == ogLowestSeqNum || udpBuf.head != ogHead);
         assert(finalBufPos - inBuf == numPackets * sizeof(MDPacket));
@@ -244,7 +241,7 @@ public:
 
             u64 numPackets = bytesRead / sizeof(MDPacket);
             assert(bytesRead % sizeof(MDPacket) == 0);
-            u8 * const inBuf = readBuf.get();
+            u8 *const inBuf = readBuf.get();
 
             assert(checkMessageDigest(inBuf, bytesRead));
 

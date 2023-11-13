@@ -22,7 +22,6 @@ enum class StrategyState {
 };
 
 
-
 class Driver {
 
 
@@ -74,7 +73,10 @@ public:
                     assert(!io_uring_cq_has_overflow(&ioState.ring));
                     assert(oe.isConnected());
 
-                    strat.recvUdpMD();
+                    CLOCK(
+                            int i = 0;
+                            strat.recvUdpMD();
+                    )
                     assert(std::abs(currentTimeNs() - strat.lastReceivedNs) < 1'000'000);
 
                     if (u32 ready = io_uring_cq_ready(&ioState.ring)) {
