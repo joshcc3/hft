@@ -1,3 +1,5 @@
+Mkonjibhu123!
+
 Goal is to setup a testbench to test optimizations to sending and receiving packets through the linux kernel.
 Problem statement:
 I want to set up the following lab using qemu.
@@ -287,3 +289,20 @@ Here's an example snippet from the output of netstat -su, where these values are
 
 
 ss -u -a : receive send queue size view usage.
+
+
+Setting up network on host:
+# Bring the interface down to make changes
+sudo ip link set dev ens3 down
+
+# Assign the IP address
+sudo ip addr add 192.168.100.10/24 dev ens3
+
+# Bring the interface up to enable networking
+sudo ip link set dev ens3 up
+
+# Add a default gateway if necessary
+sudo ip route add default via 192.168.100.1
+
+nc -l -p 1234
+nc <host> <port>
