@@ -240,8 +240,11 @@ public:
 
         if (isAlive) {
 
-            ssize_t bytesRead = recv(mdFD, readBuf.get(), READ_BUF_SZ, MSG_TRUNC);
-
+            ssize_t bytesRead;
+            CLOCK(
+                    int i = 4;
+                    bytesRead = recv(mdFD, readBuf.get(), READ_BUF_SZ, MSG_TRUNC);
+            )
             assert(bytesRead > 0);
             assert(bytesRead <= READ_BUF_SZ);
 

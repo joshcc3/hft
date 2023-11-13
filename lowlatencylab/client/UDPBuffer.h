@@ -117,26 +117,29 @@ struct UDPBuffer {
 
             if (seqNo == nextMissingSeqNo) {
 
-                int maxFull = 1;
-                MaskType alignedMask = rotr(mask, head);
-                assert(rotl(alignedMask, head) == mask);
-                assert(alignedMask & 1);
-                for (MaskType fullMask = 1;
-                     maxFull < Sz && (fullMask & alignedMask) == fullMask;
-                     ++maxFull, fullMask = nOnes(maxFull));
-                int packetsToProcess = maxFull - 1;
-                for (int j = 0; j < packetsToProcess; ++j) {
-                    const MDPacket &p = get(j);
-                    packetProcessor(time, p);
-                }
-                advance(packetsToProcess);
-                totalPacketsProccessed = packetsToProcess;
+                CLOCK(
+                        int i = 3;
+                        int maxFull = 1;
+                        MaskType alignedMask = rotr(mask, head);
+                        assert(rotl(alignedMask, head) == mask);
+                        assert(alignedMask & 1);
+                        for (MaskType fullMask = 1;
+                             maxFull < Sz && (fullMask & alignedMask) == fullMask;
+                             ++maxFull, fullMask = nOnes(maxFull));
+                        int packetsToProcess = maxFull - 1;
+                        for (int j = 0; j < packetsToProcess; ++j) {
+                            const MDPacket &p = get(j);
+                            packetProcessor(time, p);
+                        }
+                        advance(packetsToProcess);
+                        totalPacketsProccessed = packetsToProcess;
 
-                if (!unprocessed.empty() && unprocessed.front().seqNo == nextMissingSeqNo) {
-                    const MDPacket p = unprocessed.front();
-                    unprocessed.pop();
-                    totalPacketsProccessed += newMessage(time, p, packetProcessor);
-                }
+                        if (!unprocessed.empty() && unprocessed.front().seqNo == nextMissingSeqNo) {
+                            const MDPacket p = unprocessed.front();
+                            unprocessed.pop();
+                            totalPacketsProccessed += newMessage(time, p, packetProcessor);
+                        }
+                )
 
             } else {
                 totalPacketsProccessed = 0;

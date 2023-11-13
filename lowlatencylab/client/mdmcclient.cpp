@@ -73,17 +73,20 @@ public:
                     assert(!io_uring_cq_has_overflow(&ioState.ring));
                     assert(oe.isConnected());
 
+                    static int counter1 = 0;
+                    ++counter1;
                     CLOCK(
                             int i = 0;
                             strat.recvUdpMD();
-                            static int counter1 = 0;
-                            ++counter1;
-                            if((++counter1 & 0x1fff) == 0) {
-                                cout << "Book update [" << timeSpent[1] / timeSpent[0] * 100 << "%]" << endl;
-                                cout << "Order Submission [" << timeSpent[2] / timeSpent[0] * 100 << "%]" << endl;
-                                cout << "Message Handling [" << timeSpent[3] / timeSpent[0] * 100 << "%]" << endl;
-                            }
                     )
+                    if((++counter1 & 0x1fff) == 0) {
+                        cout << "Total Packet Proc [" << timeSpent[0] * 1'000'000.0 / counter1 << "us]" << '\n';
+                        cout << "Book update [" << timeSpent[1] / timeSpent[0] * 100 << "%]" << '\n';
+                        cout << "Order Submission [" << timeSpent[2] / timeSpent[0] * 100 << "%]" << '\n';
+                        cout << "Message Handling [" << timeSpent[3] / timeSpent[0] * 100 << "%]" << '\n';
+                        cout << "Recv [" << timeSpent[4] / timeSpent[0] * 100 << "%]" << '\n';
+                        cout << "----------------------" << endl;
+                    }
                     assert(std::abs(currentTimeNs() - strat.lastReceivedNs) < 1'000'000);
 
                     if (u32 ready = io_uring_cq_ready(&ioState.ring)) {
