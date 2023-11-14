@@ -56,4 +56,4 @@ add_executable(obtester
 target_link_libraries(networking uring)
 target_link_libraries(cubist Boost::iostreams)
 target_link_libraries(lll_exchange Boost::iostreams uring)
-target_link_libraries(lll_strategy Boost::iostreams uring)
+target_link_libraries(lll_strategy uring)

@@ -126,7 +126,7 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        file_out << "connectionSeen,connectionTime,curLabResult.disconnectTime,orderInfo.orderInfo.submittedTime,orderInfo.receivedTime,orderInfo.triggerReceivedTime,orderInfo.triggerSubmitTime,orderInfo.orderInfo.triggerEvent,orderInfo.orderInfo.flags.isBid,orderInfo.orderInfo.price,orderInfo.orderInfo.qty,orderInfo.id\n";
+        file_out << "connectionSeen,curLabResult.connectionTime,curLabResult.disconnectTime,orderInfo.orderInfo.submittedTime,orderInfo.receivedTime,orderInfo.orderInfo.triggerReceivedTime,orderInfo.triggerSubmitTime,orderInfo.orderInfo.triggerEvent,orderInfo.orderInfo.flags.isBid,orderInfo.orderInfo.price,orderInfo.orderInfo.qty,orderInfo.orderInfo.id\n";
 
         reset();
 

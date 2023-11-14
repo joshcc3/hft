@@ -233,7 +233,7 @@ private:
 };
 
 int main() {
-    const string &ofname = "/home/jc/CLionProjects/hft/data/trades.csv";
+    const string &ofname = "/home/jc/CLionProjects/hft/data/trades_500M.csv";
     const string &fname = "/home/jc/CLionProjects/hft/data/deribit_incremental_book_L2_2020-04-01_BTC-PERPETUAL.csv.gz";
     std::ifstream ifile(fname, std::ios_base::in | std::ios_base::binary);
     if (!ifile) {

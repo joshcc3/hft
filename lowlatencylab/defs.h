@@ -234,7 +234,7 @@ inline constexpr int OE_PORT = 9012;
 inline std::string MCAST_ADDR = "239.255.0.1";
 inline constexpr int MCAST_PORT = 12345;
 
-inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 50'000'000;
+inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 500'000'000;
 
 
 inline int
