@@ -311,3 +311,11 @@ nc <host> <port>
 echo 1 > /proc/sys/net/ipv4/ip_forward
 sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
 add route to gateway router to reach the router
+
+
+
+https://man7.org/linux/man-pages/man7/packet.7.html
+use eth_p_ip for all ip packets.
+packet_outgoing for packets looped back in.
+you can't use the IP_ADD_MEMBERSHIP on a raw packet.
+you need to use ioctls to add the multicast group 
