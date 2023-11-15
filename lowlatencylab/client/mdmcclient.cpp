@@ -79,9 +79,9 @@ public:
                     CLOCK(TOT_RECV_PC,
                             strat.recvUdpMD();
                     )
-                    int modulus = 0x1fff;
-//                    if(__builtin_expect((++counter1 & modulus) == 0, false)) {
-                    if((++counter1 & modulus) == 0) {
+                    int modulus = 0x1ff;
+                    if(__builtin_expect((++counter1 & modulus) == 0, false)) {
+//                    if((++counter1 & modulus) == 0) {
                         TimeNs cTime = currentTimeNs();
                         cout << "Iters [" << counter1 << "]" << '\n';
                         cout << "Prev Avg Loop Time [" << (cTime - prevCheckpoint) / 1'000.0 / (modulus + 1) << "us]" << '\n';

@@ -152,7 +152,8 @@ struct UDPBuffer {
             cout << "Order Submission [" << timeSpent[2] / timeSpent[0] * 100 << "%]" << endl;
             cout << "Message Handling [" << timeSpent[3] / timeSpent[0] * 100 << "%]" << endl;
 
-            throw std::runtime_error("Message gap detected: " + (msg.seqNo - nextMissingSeqNo - Sz));
+            cerr << "Message gap detected: " << (msg.seqNo - nextMissingSeqNo - Sz) << endl;
+            throw std::runtime_error("Gap detected");
         }
 
         assert(stateCheck());
