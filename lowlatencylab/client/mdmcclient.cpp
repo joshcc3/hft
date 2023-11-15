@@ -73,15 +73,18 @@ public:
                     assert(!io_uring_cq_has_overflow(&ioState.ring));
                     assert(oe.isConnected());
 
+                    static u64 prevCheckpoint = currentTimeNs();
+                    static double prevTimeSpent = timeSpent[0];
                     static int counter1 = 0;
-                    ++counter1;
                     CLOCK(
                             int i = 0;
                             strat.recvUdpMD();
                     )
                     int modulus = 0x1f;
                     if((++counter1 & modulus) == 0) {
-                        static double prevTimeSpent = timeSpent[0];
+                        TimeNs cTime = currentTimeNs();
+                        cout << "Iters [" << counter1 << "]" << '\n';
+                        cout << "Prev Avg Loop Time [" << (cTime - prevCheckpoint) / 1'000.0 / (modulus + 1) << "us]" << '\n';
                         cout << "Prev Time Spend [" << (timeSpent[0] - prevTimeSpent) * 1'000'000.0 / (modulus + 1) << "us]" << '\n';
                         cout << "Total Packet Proc [" << timeSpent[0] * 1'000'000.0 / counter1 << "us]" << '\n';
                         cout << "Book update [" << timeSpent[1] / timeSpent[0] * 100 << "%]" << '\n';
@@ -90,6 +93,7 @@ public:
                         cout << "Recv [" << timeSpent[4] / timeSpent[0] * 100 << "%]" << '\n';
                         cout << "----------------------" << '\n';
                         prevTimeSpent = timeSpent[0];
+                        prevCheckpoint = cTime;
                     }
                     assert(std::abs(currentTimeNs() - strat.lastReceivedNs) < 1'000'000);
 
