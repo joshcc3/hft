@@ -94,7 +94,7 @@ struct UDPBuffer {
     }
 
 
-    int __attribute__((always_inline)) newMessage(TimeNs time, const MDPacket &msg, PP &packetProcessor) {
+    int newMessage(TimeNs time, const MDPacket &msg, PP &packetProcessor) {
         SeqNo seqNo = msg.seqNo;
 
         assert(stateCheck());
