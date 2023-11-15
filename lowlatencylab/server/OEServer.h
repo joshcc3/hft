@@ -126,7 +126,8 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        file_out << "connectionSeen,curLabResult.connectionTime,curLabResult.disconnectTime,orderInfo.orderInfo.submittedTime,orderInfo.receivedTime,orderInfo.orderInfo.triggerReceivedTime,orderInfo.triggerSubmitTime,orderInfo.orderInfo.triggerEvent,orderInfo.orderInfo.flags.isBid,orderInfo.orderInfo.price,orderInfo.orderInfo.qty,orderInfo.orderInfo.id\n";
+        file_out
+                << "connectionSeen,curLabResult.connectionTime,curLabResult.disconnectTime,orderInfo.orderInfo.submittedTime,orderInfo.receivedTime,orderInfo.orderInfo.triggerReceivedTime,orderInfo.triggerSubmitTime,orderInfo.orderInfo.triggerEvent,orderInfo.orderInfo.flags.isBid,orderInfo.orderInfo.price,orderInfo.orderInfo.qty,orderInfo.orderInfo.id\n";
 
         reset();
 
@@ -174,6 +175,35 @@ public:
 
     void reset() {
         assert(!isAlive);
+        int lastUsedBuffer = -1;
+        while (++lastUsedBuffer < NUM_BUFFERS && used.test(lastUsedBuffer));
+        for (int i = lastUsedBuffer + 1; i < NUM_BUFFERS; ++i) {
+            assert(!used.test(i));
+        }
+        assert(lastUsedBuffer >= 0 && lastUsedBuffer <= NUM_BUFFERS);
+        assert(lastUsedBuffer == NUM_BUFFERS || !used.test(lastUsedBuffer));
+        if (lastUsedBuffer != 0) {
+            assert(io_uring_sq_ready(&ioState.ring) == 0);
+            assert(io_uring_cq_ready(&ioState.ring) == 0);
+            io_uring_sqe *bufferSqe = ioState.getSqe(BUFFER_TAG);
+            int freeBuffers = int(used.size()) - lastUsedBuffer;
+            assert(freeBuffers < NUM_BUFFERS);
+            io_uring_prep_remove_buffers(bufferSqe, freeBuffers, GROUP_ID);
+            assert(io_uring_sq_ready(&ioState.ring) == 1);
+            int completed = ioState.submitAndWait(1);
+            assert(completed == 1);
+            {
+                cqe_guard g{ioState};
+                auto completionRes = g.completion->res;
+                u64 userData = g.completion->user_data;
+                if (userData != BUFFER_TAG || completionRes != freeBuffers) {
+                    cerr << "Failed to dealloc buffers [" << completionRes << "] [" << userData << "]." << endl;
+                    assert(false);
+                }
+            }
+        }
+        used.reset();
+
         curLabResult.disconnectTime = currentTimeNs();
 
 
