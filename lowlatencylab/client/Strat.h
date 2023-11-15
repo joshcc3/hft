@@ -180,7 +180,7 @@ public:
     void processPacket(TimeNs time, const MDPacket &p) {
         assert(!isComplete);
         isComplete = p.flags.isTerm;
-        if (!isComplete) {
+        if (__builtin_expect(!isComplete, true)) {
             assert(p.seqNo > -1);
             assert(p.seqNo > lastReceivedSeqNo);
             assert(p.price > 0);
@@ -227,7 +227,7 @@ public:
 
         bool isAlive = isConnected();
 
-        if (isAlive) {
+        if (__builtin_expect(isAlive, true)) {
 
             ssize_t bytesRead;
             CLOCK(SYS_RECV_PC,
@@ -244,11 +244,14 @@ public:
 
             const u8 *endBuf = handleMessages(inBuf, numPackets, curTime);
             assert(endBuf == inBuf + sizeof(MDPacket) * numPackets);
+
+
+            TimeNs now = currentTimeNs();
+            assert(lastReceivedNs == 0 || now - lastReceivedNs < 5'000'000'000);
+            lastReceivedNs = now;
+
         }
 
-        TimeNs now = currentTimeNs();
-        assert(lastReceivedNs == 0 || now - lastReceivedNs < 5'000'000'000);
-        lastReceivedNs = now;
 
         assert(!udpBuf.test(0));
         assert(ogSeqNo == udpBuf.nextMissingSeqNo || cursor > ogCursor && (ogMask == 0 || ogMask != udpBuf.mask));
@@ -260,7 +263,7 @@ public:
     [[nodiscard]] bool isConnected() const noexcept {
         TimeNs now = currentTimeNs();
         bool notDelayed = std::abs(now - lastReceivedNs) < 1000000;
-        return !isComplete && mdFD != -1 && notDelayed;
+        return !isComplete && mdFD != -1 && (lastReceivedNs == 0 || notDelayed);
     }
 };
 
