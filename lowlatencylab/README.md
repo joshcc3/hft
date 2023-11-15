@@ -233,6 +233,11 @@ jc-dev
 -device e1000e,netdev=net0,id=nic0
 
 
+I tried getting multicast traffic looped back to the host forwarded to the tap device. The loopback works.
+Adding a listener to ensure the multicast group is subscribed to and adding the following rules don't do anything to forward the traffic.
+I suspect the tap0 is not getting the traffic or if it is qemu is not forwarding the traffic to the nic. either way something to investigate and experiment on.
+
+
 A simple way to route specific packets that youre interested in:
 mark the packets in pre routing
 sudo iptables -t mangle -A PREROUTING -d 239.255.0.1 -p udp --dport 12345 -j MARK --set-mark 1
@@ -264,6 +269,8 @@ ethtool -S eth0
 
 ----------------------
 
+
+------------------
 
 debugging why packets are being dropped:
 /proc/net/snmp is invaluable:
@@ -348,6 +355,6 @@ you can't use the IP_ADD_MEMBERSHIP on a raw packet.
 you need to use ioctls to add the multicast group 
 
 
-g++ -o lll_strategy -luring lowlatencylab/client/mdmcclient.cpp lowlatencylab/client/mdmcclient.h lowlatencylab/client/L2OB.cpp lowlatencylab/client/L2OB.h lowlatencylab/defs.h lowlatencylab/client/Strat.h 
+rm lll_strategy || (g++ -o lll_strategy -luring lowlatencylab/client/mdmcclient.cpp lowlatencylab/client/mdmcclient.h lowlatencylab/client/L2OB.cpp lowlatencylab/client/L2OB.h lowlatencylab/defs.h lowlatencylab/client/Strat.h && nc 192.168.100.2 -p 1234)
 
 sudo ./qemu-system-x86_64 -m 1024 -enable-kvm -drive if=virtio,file=test.qcow2,cache=none -cdrom ~/Downloads/Fedora-Workstation-Live-x86_64-38-1.6.iso   -netdev tap,id=net0,ifname=tap0,script=no,downscript=no   -device e1000e,netdev=net0,id=nic0
