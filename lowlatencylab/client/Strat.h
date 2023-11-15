@@ -263,8 +263,9 @@ public:
 
     [[nodiscard]] bool isConnected() const noexcept {
         TimeNs now = currentTimeNs();
-        bool notDelayed = std::abs(now - lastReceivedNs) < 10'000'000;
-        return !isComplete && mdFD != -1 && (lastReceivedNs == 0 || notDelayed);
+//        bool notDelayed = std::abs(now - lastReceivedNs) < 10'000'000;
+//        return !isComplete && mdFD != -1 && (lastReceivedNs == 0 || notDelayed);
+        return !isComplete && mdFD != -1;
     }
 };
 

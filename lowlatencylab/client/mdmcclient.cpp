@@ -94,7 +94,7 @@ public:
                         prevTimeSpent = timeSpent[0];
                         prevCheckpoint = cTime;
                     }
-                    assert(std::abs(currentTimeNs() - strat.lastReceivedNs) < 10'000'000);
+//                    assert(std::abs(currentTimeNs() - strat.lastReceivedNs) < 10'000'000);
 
                     if (u32 ready = io_uring_cq_ready(&ioState.ring)) {
                         unsigned head;

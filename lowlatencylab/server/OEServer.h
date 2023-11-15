@@ -174,7 +174,6 @@ public:
 
     void reset() {
         assert(!isAlive);
-        used.reset();
         curLabResult.disconnectTime = currentTimeNs();
 
 
@@ -212,8 +211,6 @@ public:
         io_uring_sqe *bufferSqe = ioState.getSqe(BUFFER_TAG);
         io_uring_prep_provide_buffers(bufferSqe, buffers.get(), BUFFER_SIZE, NUM_BUFFERS, GROUP_ID, 0);
         assert(io_uring_sq_ready(&ioState.ring) == 1);
-
-        io_uring_cqe *e;
 
         assert(clientFD != -1);
         assert(isAlive);
@@ -258,6 +255,7 @@ public:
             int bytesRead = returnCode;
             u32 numMessages = bytesRead / sizeof(Order);
             assert(bytesRead % sizeof(Order) == 0);
+            assert(bytesRead <= BUFFER_SIZE);
 
             char *endBuf = handleMessages(buf, numMessages, curLabResult, curTime);
             assert(endBuf == buf + sizeof(Order) * numMessages);

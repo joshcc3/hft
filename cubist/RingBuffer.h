@@ -23,7 +23,7 @@ public:
 
     static_assert(__builtin_popcount(Capacity) == 1);
     RingBuffer() : data{static_cast<T *>(malloc(sizeof(T) * Capacity))}, head{0}, tail{0} {
-        if (data == NULL) {
+        if (data.get() == nullptr) {
             throw std::bad_alloc();
         }
     }
