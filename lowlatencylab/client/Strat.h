@@ -249,7 +249,7 @@ public:
 
 
             TimeNs now = currentTimeNs();
-            assert(lastReceivedNs == 0 || now - lastReceivedNs < 5'000'000'000);
+            assert(lastReceivedNs == 0 || now - lastReceivedNs < 100'000'000);
             lastReceivedNs = now;
 
         }
