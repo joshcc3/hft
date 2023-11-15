@@ -52,7 +52,7 @@ public:
 
     IOUringState &ioState;
     int serverFD = -1;
-    struct sockaddr_in multicast_sockaddr{};
+    struct sockaddr_in unicast_addr{};
     MDMsgId cursor = 0;
 
     std::ifstream &ifile;
@@ -91,35 +91,11 @@ public:
         }
 //        assert(bufSize == 2 * SND_BUF_SZ);
 
-        unsigned char loopback = 1;
-        if (setsockopt(serverFD, IPPROTO_IP, IP_MULTICAST_LOOP,
-                       &loopback, sizeof(loopback)) < 0) {
-            close(serverFD);
-            perror("setsockopt() failed");
-            exit(EXIT_FAILURE);
-        }
-
-        int loopbackT = 0;
-        socklen_t sz = sizeof(loopbackT);
-        if (getsockopt(serverFD, IPPROTO_IP, IP_MULTICAST_LOOP, &loopbackT, &sz) < 0) {
-            perror("COuld not get sock opt loop");
-            exit(EXIT_FAILURE);
-        }
-
-        assert(loopbackT == 1);
-
 
         // Set up the sockaddr structure
-        multicast_sockaddr.sin_family = AF_INET;
-        multicast_sockaddr.sin_addr.s_addr = inet_addr(MCAST_ADDR.c_str());
-        multicast_sockaddr.sin_port = htons(MCAST_PORT);
-
-        int ttl = 10; // Set TTL for multicast; increase if necessary
-        if (setsockopt(serverFD, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) < 0) {
-            perror("Error setting IP_MULTICAST_TTL");
-            close(serverFD);
-            exit(EXIT_FAILURE);
-        }
+        unicast_addr.sin_family = AF_INET;
+        unicast_addr.sin_addr.s_addr = inet_addr(MD_UNICAST_ADDR.c_str());
+        unicast_addr.sin_port = htons(MD_UNICAST_PORT);
 
         reset();
 
@@ -198,8 +174,8 @@ public:
             assert(multicast_sockaddr.sin_port > 0);
             int flags = MSG_CONFIRM;
             sendto(serverFD, bufStart, bufLen, flags,
-                                 (const struct sockaddr *) &multicast_sockaddr,
-                                 sizeof(multicast_sockaddr));
+                                 (const struct sockaddr *) &unicast_addr,
+                                 sizeof(unicast_addr));
             ackedBytes = sentBytes;
         }
 
@@ -240,8 +216,8 @@ public:
             assert(multicast_sockaddr.sin_port > 0);
             int flags = MSG_CONFIRM;
             io_uring_prep_sendto(mdSqe, serverFD, bufStart, bufLen, flags,
-                                 (const struct sockaddr *) &multicast_sockaddr,
-                                 sizeof(multicast_sockaddr));
+                                 (const struct sockaddr *) &unicast_addr,
+                                 sizeof(unicast_addr));
 
             return true;
         } else {

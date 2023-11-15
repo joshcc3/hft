@@ -294,6 +294,7 @@ I get recvbuferrors however the packets are being delievered in order.
 
 https://blog.cloudflare.com/missing-manuals-io_uring-worker-pool/
 
+netstat -su
 
 /proc/net/udp
 111675752 packet receive errors
@@ -318,8 +319,6 @@ Receive Buffer Errors:
 These errors specifically count the number of packets that have been lost due to insufficient buffer space. When the UDP protocol receives a packet, it places it into a queue (socket receive buffer) to be read by the application. If this buffer is full, the new incoming packet cannot be queued and is consequently dropped. This buffer overflow situation is commonly encountered when an application doesn't read incoming data quickly enough, causing the buffer to fill up beyond its capacity. The "receive buffer errors" would then increment each time this happens.
 
 Here's an example snippet from the output of netstat -su, where these values are typically listed:
-
-
 ss -u -a : receive send queue size view usage.
 
 

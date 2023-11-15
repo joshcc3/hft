@@ -68,22 +68,11 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        ip_mreq mreq{};
-        mreq.imr_multiaddr.s_addr = inet_addr(MCAST_ADDR.c_str());
-        mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-        int errcode;
-        if ((errcode = setsockopt(mdFD, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq))) < 0) {
-            cerr << errno << endl;
-            perror("Membership join");
-            close(mdFD);
-            exit(EXIT_FAILURE);
-        }
-
 
         struct sockaddr_in addr{};
         addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_ANY); // inet_addr("127.0.0.1"); // Receive from any address
-        addr.sin_port = htons(MCAST_PORT);
+        addr.sin_addr.s_addr = inet_addr(MD_UNICAST_ADDR.c_str());
+        addr.sin_port = htons(MD_UNICAST_PORT);
 
         // Bind to receive address
         if (bind(mdFD, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
@@ -245,7 +234,7 @@ public:
             ssize_t bytesRead;
             CLOCK(
                     int i = 4;
-                    bytesRead = recv(mdFD, readBuf.get(), READ_BUF_SZ, MSG_TRUNC);
+                    bytesRead = recvfrom(mdFD, readBuf.get(), READ_BUF_SZ, MSG_TRUNC, nullptr, nullptr);
             )
             assert(bytesRead > 0);
             assert(bytesRead <= READ_BUF_SZ);
