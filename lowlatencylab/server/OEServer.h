@@ -135,6 +135,7 @@ public:
     }
 
     ~OEServer() {
+        releaseBuffers();
         reset();
         if (serverFD != -1) {
             close(serverFD);
@@ -142,7 +143,7 @@ public:
         }
     }
 
-    void prepAccept() {
+    void doAccept() {
         assert(clientFD == -1);
         assert(!isAlive);
         assert(clientAddrSz > 0);
@@ -155,6 +156,14 @@ public:
         assert(fcntl(serverFD, F_GETFD) != -1);
         io_uring_prep_accept(acceptSqe, serverFD, (struct sockaddr *) &clientAddr, &clientAddrSz,
                              SOCK_NONBLOCK | O_CLOEXEC);
+        assert(io_uring_sq_ready(&ioState.ring) == 1);
+        int completedEvents = ioState.submitAndWait(1);
+        assert(completedEvents == 1);
+        assert(io_uring_cq_ready(&ioState.ring) <= 1);
+        {
+            cqe_guard cg{ioState};
+            receiveConn(cg.completion);
+        }
     }
 
     void receiveConn(io_uring_cqe *completion) {
@@ -176,24 +185,6 @@ public:
 
     void reset() {
         assert(!isAlive);
-        int nextFreeBuffer = -1;
-        while (++nextFreeBuffer < NUM_BUFFERS && used.test(nextFreeBuffer));
-        for (int i = nextFreeBuffer; i < NUM_BUFFERS; ++i) {
-            assert(!used.test(i));
-        }
-        assert(nextFreeBuffer >= 0 && nextFreeBuffer <= NUM_BUFFERS);
-        assert(nextFreeBuffer == NUM_BUFFERS || !used.test(nextFreeBuffer));
-        if (nextFreeBuffer != 0) {
-            assert(io_uring_sq_ready(&ioState.ring) == 0);
-            io_uring_sqe *bufferSqe = ioState.getSqe(BUFFER_REMOVE_TAG);
-            int freeBuffers = int(used.size()) - nextFreeBuffer;
-            assert(freeBuffers < NUM_BUFFERS);
-            io_uring_prep_remove_buffers(bufferSqe, freeBuffers, GROUP_ID);
-            assert(io_uring_sq_ready(&ioState.ring) == 1);
-            int submitted = ioState.submit();
-            assert(submitted == 1);
-        }
-        used.reset();
 
         curLabResult.disconnectTime = currentTimeNs();
 
@@ -218,6 +209,25 @@ public:
         curLabResult.seenOrders.clear();
         curLabResult.connectionTime = 0;
         curLabResult.disconnectTime = 0;
+
+    }
+
+    void releaseBuffers() {
+        int nextFreeBuffer = -1;
+        while (++nextFreeBuffer < NUM_BUFFERS && used.test(nextFreeBuffer));
+        for (int i = nextFreeBuffer; i < NUM_BUFFERS; ++i) {
+            assert(!used.test(i));
+        }
+        assert(nextFreeBuffer >= 0 && nextFreeBuffer <= NUM_BUFFERS);
+        assert(nextFreeBuffer == NUM_BUFFERS || !used.test(nextFreeBuffer));
+        assert(io_uring_sq_ready(&ioState.ring) == 0);
+        io_uring_sqe *bufferSqe = ioState.getSqe(BUFFER_REMOVE_TAG);
+        int freeBuffers = int(used.size()) - nextFreeBuffer;
+        assert(freeBuffers <= NUM_BUFFERS);
+        io_uring_prep_remove_buffers(bufferSqe, freeBuffers, GROUP_ID);
+        assert(io_uring_sq_ready(&ioState.ring) == 1);
+        int submitted = ioState.submit();
+        assert(submitted == 1);
 
     }
 
@@ -260,7 +270,6 @@ public:
         assert(userData == RECV_TAG);
         int returnCode = completion.res;
         assert(returnCode >= 0 || -returnCode == EBADF || -returnCode == ENOBUFS);
-        assert(!multishotDone || ((completion.flags & IORING_CQE_F_MORE) == 0));
         multishotDone = ((completion.flags & IORING_CQE_F_MORE) == 0);
         assert(isAlive || returnCode >= 0 || -returnCode == EBADF || -returnCode == ENOBUFS);
         isAlive = isAlive && (returnCode > 0 || returnCode == -ENOBUFS);
@@ -268,8 +277,10 @@ public:
 
         if (isAlive && returnCode > 0) {
             u32 bufferIx = completion.flags >> (sizeof(completion.flags) * 8 - 16);
+            assert(completion.flags & IORING_CQE_F_BUFFER);
             assert(bufferIx < NUM_BUFFERS);
             assert(!used.test(bufferIx));
+
 
             char *buf = buffers.get() + bufferIx * BUFFER_SIZE;
             int bytesRead = returnCode;
@@ -285,12 +296,15 @@ public:
             assert(io_uring_sq_ready(&ioState.ring) == 0);
         } else if (!isAlive) {
             assert(returnCode == 0 || -returnCode == EBADF);
+            releaseBuffers();
             reset();
         } else if (-returnCode == ENOBUFS) {
             assert(multishotDone && isAlive);
         } else {
             assert(false);
         }
+
+        assert(!multishotDone || ((completion.flags & IORING_CQE_F_MORE) == 0));
 
         if (multishotDone && isAlive) {
             assert(used.all());

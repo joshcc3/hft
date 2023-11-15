@@ -48,15 +48,8 @@ public:
         while (true) {
             switch (state) {
                 case ExchangeState::INIT: {
-                    oe.prepAccept();
-                    assert(io_uring_sq_ready(&ioState.ring) == 1);
-                    int completedEvents = ioState.submitAndWait(1);
-                    assert(completedEvents == 1);
-                    assert(io_uring_cq_ready(&ioState.ring) <= 1);
-                    {
-                        cqe_guard cg{ioState};
-                        oe.receiveConn(cg.completion);
-                    }
+                    oe.doAccept();
+
                     assert(io_uring_sq_ready(&ioState.ring) == 0);
                     assert(io_uring_cq_ready(&ioState.ring) == 0);
                     cout << "OE Connected" << endl;
@@ -114,6 +107,8 @@ public:
                                     oe.completeMessages(e);
                                 } else if (userData >= MDServer::MD_SEND_TAG &&
                                            userData <= MDServer::MD_SEND_TAG + md.sentBytes) {
+                                    assert((e.flags & IORING_CQE_F_MORE) == 0);
+                                    assert((e.flags & IORING_CQE_F_BUFFER) == 0);
                                     if (resultCode > 0) {
                                         md.completeMessage(userData, resultCode);
                                     } else if (-resultCode == EAGAIN || -resultCode == EALREADY) {
@@ -126,6 +121,7 @@ public:
                                     [[maybe_unused]] u64 completionRes = e.res;
                                     [[maybe_unused]] u64 completionTag = e.user_data;
                                     assert(e.res == OEServer::NUM_BUFFERS || e.res == 0);
+                                    assert(!oe.used.test(6));
                                 } else if (userData == OEServer::BUFFER_REMOVE_TAG) {
                                     auto completionRes = e.res;
                                     if (completionRes <= 0) {
@@ -133,6 +129,7 @@ public:
                                              << "]." << endl;
                                         assert(false);
                                     }
+                                    oe.used.reset();
                                 } else {
                                     assert(false);
                                 }
