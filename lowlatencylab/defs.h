@@ -243,7 +243,7 @@ inline std::string MCAST_ADDR = "239.255.0.1";
 inline constexpr int MCAST_PORT = 12345;
 
 //inline std::string MD_UNICAST_ADDR = "192.168.100.2"; // "192.168.100.2";
-inline std::string MD_UNICAST_ADDR = "192.168.100.2"; // "192.168.100.2";
+inline std::string MD_UNICAST_ADDR = "192.168.100.1"; // "192.168.100.2";
 inline constexpr uint16_t MD_UNICAST_PORT = 4321;
 
 inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 500'000'000;
