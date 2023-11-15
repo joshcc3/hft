@@ -85,7 +85,7 @@ public:
             cerr << "Could not create oe server [" << errno << "]" << endl;
             exit(EXIT_FAILURE);
         }
-        assert(serverFD == md.serverFD + 1); // assume that this is the second socket opened
+        assert(serverFD > 2); // assume that this is the second socket opened
 
         int enable = 1;
         if (setsockopt(serverFD, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0) {

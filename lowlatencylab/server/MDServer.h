@@ -170,8 +170,8 @@ public:
             assert(bufLen < SND_BUF_SZ && bufLen > 0);
             sentBytes += bufLen;
 
-            assert(multicast_sockaddr.sin_addr.s_addr > 0);
-            assert(multicast_sockaddr.sin_port > 0);
+            assert(unicast_addr.sin_addr.s_addr > 0);
+            assert(unicast_addr.sin_port > 0);
             int flags = MSG_CONFIRM;
             sendto(serverFD, bufStart, bufLen, flags,
                                  (const struct sockaddr *) &unicast_addr,
@@ -212,8 +212,8 @@ public:
             io_uring_sqe *mdSqe = ioState.getSqe(MD_SEND_TAG + sentBytes);
             sentBytes += bufLen;
 
-            assert(multicast_sockaddr.sin_addr.s_addr > 0);
-            assert(multicast_sockaddr.sin_port > 0);
+            assert(unicast_addr.sin_addr.s_addr > 0);
+            assert(unicast_addr.sin_port > 0);
             int flags = MSG_CONFIRM;
             io_uring_prep_sendto(mdSqe, serverFD, bufStart, bufLen, flags,
                                  (const struct sockaddr *) &unicast_addr,

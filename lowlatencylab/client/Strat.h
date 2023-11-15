@@ -118,7 +118,7 @@ public:
                 sideQty = askSize;
                 oppSidePrice = bestBid;
             } else {
-                static_assert(false);
+                throw std::runtime_error("Unexpected");
             }
 
             PriceL notionalChange = price * qty - sidePrice * sideQty;
@@ -206,7 +206,9 @@ public:
                     checkTrade<Side::SELL>(seqNo, time, isSnapshot, localTimestamp, price, qty);
                 }
             } else {
+                CLOCK(BOOK_UPDATE_PC,
                 ob.cancel(localTimestamp, price, p.flags.isBid ? BUY : SELL);
+                )
             }
 
             cursor = p.seqNo;
@@ -256,7 +258,6 @@ public:
         assert(!udpBuf.test(0));
         assert(ogSeqNo == udpBuf.nextMissingSeqNo || cursor > ogCursor && (ogMask == 0 || ogMask != udpBuf.mask));
         assert(cursor >= ogCursor);
-        assert(lastReceivedNs == now);
 
     }
 

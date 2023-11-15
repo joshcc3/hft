@@ -62,7 +62,6 @@ public:
                     assert(oe.isConnected());
                     assert(strat.lastReceivedNs == 0);
                     assert(strat.cursor == 0);
-                    assert(!strat.isConnected());
                     assert(ob.seen.empty());
 
                     state = StrategyState::RUNNING;
@@ -79,7 +78,7 @@ public:
                     CLOCK(TOT_RECV_PC,
                             strat.recvUdpMD();
                     )
-                    int modulus = 0x1ff;
+                    int modulus = 0x1f;
                     if(__builtin_expect((++counter1 & modulus) == 0, false)) {
 //                    if((++counter1 & modulus) == 0) {
                         TimeNs cTime = currentTimeNs();
@@ -111,6 +110,8 @@ public:
                             if (userData >= OE::ORDER_TAG) {
                                 oe.completeMessage(e);
                             } else {
+                                cerr << "Unexpected userdata [" << userData << "]";
+                                throw std::runtime_error("Unexpected");
                                 assert(false);
                             }
                             ++processed;
@@ -139,7 +140,6 @@ public:
         switch (state) {
             case StrategyState::INIT: {
                 assert(!oe.isConnected());
-                assert(!strat.isConnected());
                 assert(strat.cursor == 0);
                 assert(ob.seen.empty());
                 assert(io_uring_sq_ready(&ioState.ring) == 0);

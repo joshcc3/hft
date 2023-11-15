@@ -19,3 +19,22 @@ https://blog.cloudflare.com/virtual-networking-101-understanding-tap/
 
 
 We are going to use raw_sockets to see how fast we can now process them instead.
+
+[jc@fedora hft]$ clang++ -O3 -o lll_strategy -luring lowlatencylab/client/mdmcclient.cpp lowlatencylab/client/L2OB.cpp&& ./lll_strategy
+
+
+Perf optimization notes:
+As it stands (5aeb0049753b319177fb83ab61d1da2fd1d85baf) - the strategy has the following breakdown :
+Iters [10240]
+Prev Avg Loop Time [22.8359us]
+Prev Time Spend [22.649us]
+Total Packet Proc [24.4487us]
+Book update [4.91729%]
+Order Submission [0.438054%]
+Message Handling [7.60806%]
+Recv [89.3757%]
+
+
+It goes through 10240 iterations, The loop time of receiving a marketdata packet to responding on average currently stands at 22us.
+Prev avg loop time is the time it takes to go through a loop of checking md, updating ob, sending orders checking completions and then back.
+The recv is the bottleneck over here.

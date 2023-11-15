@@ -22,7 +22,7 @@
 #include <iostream>
 #include <unordered_map>
 
-#define NDEBUG
+//#define NDEBUG
 
 #ifdef NDEBUG
 #undef assert
@@ -242,7 +242,8 @@ inline constexpr int OE_PORT = 9012;
 inline std::string MCAST_ADDR = "239.255.0.1";
 inline constexpr int MCAST_PORT = 12345;
 
-inline std::string MD_UNICAST_ADDR = "192.168.100.1"; // "192.168.100.2";
+inline std::string MD_UNICAST_ADDR = "192.168.100.2"; // "192.168.100.2";
+//inline std::string MD_UNICAST_ADDR = "192.168.100.1"; // "192.168.100.2";
 inline constexpr uint16_t MD_UNICAST_PORT = 4321;
 
 inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 500'000'000;
@@ -317,7 +318,6 @@ parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localTimestamp, b
 
 inline bool checkMessageDigest(const u8 *buf, ssize_t bytes) {
     static std::unordered_map<int, MDPacket> seenHashes{};
-
     const MDPacket &p = *reinterpret_cast<const MDPacket *>(buf);
 
     const auto &[e, inserted] = seenHashes.emplace(p.seqNo, p);

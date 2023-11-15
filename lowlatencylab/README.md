@@ -354,6 +354,8 @@ you can't use the IP_ADD_MEMBERSHIP on a raw packet.
 you need to use ioctls to add the multicast group 
 
 
+[jc@fedora hft]$ clang++ -O3 -o lll_strategy -luring lowlatencylab/client/mdmcclient.cpp lowlatencylab/client/L2OB.cpp && cat lll_strategy | nc 192.168.100.2 1234
+
 rm lll_strategy || (g++ -o lll_strategy -luring lowlatencylab/client/mdmcclient.cpp lowlatencylab/client/mdmcclient.h lowlatencylab/client/L2OB.cpp lowlatencylab/client/L2OB.h lowlatencylab/defs.h lowlatencylab/client/Strat.h && nc 192.168.100.2 -p 1234)
 
 sudo ./qemu-system-x86_64 -m 1024 -enable-kvm -drive if=virtio,file=test.qcow2,cache=none -cdrom ~/Downloads/Fedora-Workstation-Live-x86_64-38-1.6.iso   -netdev tap,id=net0,ifname=tap0,script=no,downscript=no   -device e1000e,netdev=net0,id=nic0

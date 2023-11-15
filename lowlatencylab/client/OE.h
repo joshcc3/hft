@@ -201,10 +201,13 @@ public:
         OrderId receivedId = cUserData - ORDER_TAG;
 
         if (receivedId == curOrder.id) {
+            if(cRes <= 0) {
+                cerr << "Unexpected error code [" << cRes << "]" << endl;
+                throw std::runtime_error("Unexpected");
+            }
             assert(cRes > 0);
             assert(!(cFlags & IORING_CQE_F_BUFFER));
             assert(!(cFlags & IORING_CQE_F_NOTIF));
-            assert(cRes > 0 || -cRes != EBADF);
 
             // id, latency time,
 //            cout << curOrder.id << "," << double(curTime - curOrder.triggerReceivedTime) / 1000.0 << ","
