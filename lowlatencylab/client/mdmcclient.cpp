@@ -76,8 +76,7 @@ public:
                     static u64 prevCheckpoint = currentTimeNs();
                     static double prevTimeSpent = timeSpent[0];
                     static int counter1 = 0;
-                    CLOCK(
-                            int i = 0;
+                    CLOCK(TOT_RECV_PC,
                             strat.recvUdpMD();
                     )
                     int modulus = 0x1f;
@@ -85,12 +84,12 @@ public:
                         TimeNs cTime = currentTimeNs();
                         cout << "Iters [" << counter1 << "]" << '\n';
                         cout << "Prev Avg Loop Time [" << (cTime - prevCheckpoint) / 1'000.0 / (modulus + 1) << "us]" << '\n';
-                        cout << "Prev Time Spend [" << (timeSpent[0] - prevTimeSpent) * 1'000'000.0 / (modulus + 1) << "us]" << '\n';
-                        cout << "Total Packet Proc [" << timeSpent[0] * 1'000'000.0 / counter1 << "us]" << '\n';
-                        cout << "Book update [" << timeSpent[1] / timeSpent[0] * 100 << "%]" << '\n';
-                        cout << "Order Submission [" << timeSpent[2] / timeSpent[0] * 100 << "%]" << '\n';
-                        cout << "Message Handling [" << timeSpent[3] / timeSpent[0] * 100 << "%]" << '\n';
-                        cout << "Recv [" << timeSpent[4] / timeSpent[0] * 100 << "%]" << '\n';
+                        cout << "Prev Time Spend [" << (GET_PC(0) - prevTimeSpent) * 1'000'000.0 / (modulus + 1) << "us]" << '\n';
+                        cout << "Total Packet Proc [" << GET_PC(0) * 1'000'000.0 / counter1 << "us]" << '\n';
+                        cout << "Book update [" << GET_PC(1) / GET_PC(0) * 100 << "%]" << '\n';
+                        cout << "Order Submission [" << GET_PC(2) / GET_PC(0) * 100 << "%]" << '\n';
+                        cout << "Message Handling [" << GET_PC(3) / GET_PC(0) * 100 << "%]" << '\n';
+                        cout << "Recv [" << GET_PC(4) / GET_PC(0) * 100 << "%]" << '\n';
                         cout << "----------------------" << '\n';
                         prevTimeSpent = timeSpent[0];
                         prevCheckpoint = cTime;

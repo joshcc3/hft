@@ -79,13 +79,11 @@ public:
         assert(localTimestamp > 0);
         TopLevel res;
         if (side == Side::BUY) {
-            CLOCK(
-                int i = 1;
+            CLOCK(BOOK_UPDATE_PC,
                   res = update < Side::BUY > (isSnapshot, bid, ask, localTimestamp, price, qty);
             )
         } else if (side == Side::SELL) {
-            CLOCK(
-                    int i = 1;
+            CLOCK(BOOK_UPDATE_PC,
                     res = update < Side::SELL > (isSnapshot, ask, bid, localTimestamp, price, qty);
             )
         } else {

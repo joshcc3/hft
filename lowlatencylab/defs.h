@@ -37,11 +37,11 @@ inline double elapsed(T t1, T t2) {
 
 }
 
-#define CLOCK(a) { \
+#define CLOCK(c, a) { \
     auto _s = std::chrono::system_clock::now(); \
     a;             \
     auto _e = std::chrono::system_clock::now(); \
-    timeSpent[i] += elapsed(_s, _e);                      \
+    GET_PC(c) += elapsed(_s, _e);                      \
 }
 
 
@@ -123,6 +123,14 @@ inline TimeNs currentTimeNs() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
             (std::chrono::system_clock::now()).time_since_epoch()).count();
 }
+
+#define GET_PC(c) timeSpent[c]
+
+inline int TOT_RECV_PC = 0;
+inline int BOOK_UPDATE_PC = 1;
+inline int ORDER_SUBMISSION_PC = 2;
+inline int MSG_HANDLING_PC = 3;
+inline int SYS_RECV_PC = 4;
 
 struct IOUringState {
 

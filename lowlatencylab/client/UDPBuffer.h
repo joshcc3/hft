@@ -117,8 +117,7 @@ struct UDPBuffer {
 
             if (seqNo == nextMissingSeqNo) {
 
-                CLOCK(
-                        int i = 3;
+                CLOCK(MSG_HANDLING_PC,
                         int maxFull = 1;
                         MaskType alignedMask = rotr(mask, head);
                         assert(rotl(alignedMask, head) == mask);

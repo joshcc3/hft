@@ -127,15 +127,13 @@ public:
                 if (notionalChange > TRADE_THRESHOLD) {
                     PriceL tradePrice = oppSidePrice;
                     OrderFlags flags{.isBid = !isBid};
-                    CLOCK(
-                            int i = 2;
+                    CLOCK(ORDER_SUBMISSION_PC,
                             orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
                     )
                 } else if (notionalChange < -TRADE_THRESHOLD) {
                     PriceL tradePrice = sidePrice;
                     OrderFlags flags{.isBid = isBid};
-                    CLOCK(
-                            int i = 2;
+                    CLOCK(ORDER_SUBMISSION_PC,
                             orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
                     )
                 }
@@ -232,8 +230,7 @@ public:
         if (isAlive) {
 
             ssize_t bytesRead;
-            CLOCK(
-                    int i = 4;
+            CLOCK(SYS_RECV_PC,
                     bytesRead = recvfrom(mdFD, readBuf.get(), READ_BUF_SZ, MSG_TRUNC, nullptr, nullptr);
             )
             assert(bytesRead > 0);
