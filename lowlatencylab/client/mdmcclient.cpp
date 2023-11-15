@@ -134,7 +134,9 @@ public:
 
     bool stateCheck() {
         assert(strat.cursor >= 0);
-        assert(strat.cursor == 0 || oe.isConnected() && strat.isConnected() && strat.lastReceivedNs > 0);
+        assert(strat.cursor == 0 || strat.isConnected());
+        assert(strat.cursor == 0 || oe.isConnected());
+        assert(strat.cursor == 0 || strat.lastReceivedNs > 0);
         assert(ioState.ring.sq.ring_entries >= 256);
         assert(ioState.ring.ring_fd > 2);
         switch (state) {
