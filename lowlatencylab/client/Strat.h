@@ -71,7 +71,9 @@ public:
         ip_mreq mreq{};
         mreq.imr_multiaddr.s_addr = inet_addr(MCAST_ADDR.c_str());
         mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-        if (setsockopt(mdFD, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
+        int errcode;
+        if ((errcode = setsockopt(mdFD, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq))) < 0) {
+            cerr << errno << endl;
             perror("Membership join");
             close(mdFD);
             exit(EXIT_FAILURE);

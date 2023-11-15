@@ -18,8 +18,6 @@ add_executable(lll_strategy
         lowlatencylab/client/L2OB.cpp
         lowlatencylab/client/L2OB.h
         lowlatencylab/defs.h
-#        lowlatencylab/client/StratRawSock.cpp
-#        lowlatencylab/client/StratRawSock.h
         lowlatencylab/client/Strat.h
 )
 

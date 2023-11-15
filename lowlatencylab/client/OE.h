@@ -114,7 +114,7 @@ public:
 
 
         serverAddr.sin_family = AF_INET;
-        serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        serverAddr.sin_addr.s_addr = inet_addr("192.168.100.1"); // inet_addr("127.0.0.1");
         serverAddr.sin_port = htons(OE_PORT);
 
         if (connect(clientFD, (struct sockaddr *) &serverAddr, sizeof(serverAddr)) < 0) {

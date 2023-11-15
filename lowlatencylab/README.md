@@ -213,6 +213,26 @@ I think the kernel doesn't forward the packets on a loopback to any physical int
 MD Pcaps: https://databento.com/pcaps#samples
 
 
+sudo ip tuntap add dev tap0 mode tap user `whoami`
+sudo ip link set tap0 up
+sudo ip addr add 192.168.100.1/24 dev tap0
+
+on the guest vm:
+sudo ip addr add 192.168.100.2/24 dev ens3
+
+nc -lk 1234 on guest
+echo abcd | nc 192.168.100.2 1234 on host to test network connectivity.
+
+
+yum install bridge-utils
+
+Mkonjibhu123!
+jc-dev
+./qemu-system-x86_64 -m 1024 -enable-kvm -drive if=virtio,file=test.qcow2,cache=none -cdrom ~/Downloads/Fedora-Workstation-Live-x86_64-38-1.6.iso \
+-netdev tap,id=net0,ifname=tap0,script=no,downscript=no \
+-device e1000e,netdev=net0,id=nic0
+
+
 A simple way to route specific packets that youre interested in:
 mark the packets in pre routing
 sudo iptables -t mangle -A PREROUTING -d 239.255.0.1 -p udp --dport 12345 -j MARK --set-mark 1
@@ -226,6 +246,11 @@ sudo ip rule add fwmark 1 table multicast
 # Set the default route for this table to go out via tap0
 sudo ip route add default dev tap0 table multicast
 
+
+{ - this doesn't work
+sudo sysctl -w net.ipv4.ip_forward=1
+sudo iptables -A FORWARD -i wlp0s20f3 -o tap0 -d 239.255.0.1 -j ACCEPT
+}
 
 Details for packet info on a machine:
 /proc/net/dev - live packet info
@@ -304,6 +329,8 @@ sudo ip link set dev ens3 up
 # Add a default gateway if necessary
 sudo ip route add default via 192.168.100.1
 
+Need to bind to the tap device.
+
 nc -l -p 1234
 nc <host> <port>
 
@@ -319,3 +346,8 @@ use eth_p_ip for all ip packets.
 packet_outgoing for packets looped back in.
 you can't use the IP_ADD_MEMBERSHIP on a raw packet.
 you need to use ioctls to add the multicast group 
+
+
+g++ -o lll_strategy -luring lowlatencylab/client/mdmcclient.cpp lowlatencylab/client/mdmcclient.h lowlatencylab/client/L2OB.cpp lowlatencylab/client/L2OB.h lowlatencylab/defs.h lowlatencylab/client/Strat.h 
+
+sudo ./qemu-system-x86_64 -m 1024 -enable-kvm -drive if=virtio,file=test.qcow2,cache=none -cdrom ~/Downloads/Fedora-Workstation-Live-x86_64-38-1.6.iso   -netdev tap,id=net0,ifname=tap0,script=no,downscript=no   -device e1000e,netdev=net0,id=nic0
