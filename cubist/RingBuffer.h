@@ -20,7 +20,6 @@ struct Free {
 template<typename T, std::size_t Capacity>
 class RingBuffer {
 public:
-
     static_assert(__builtin_popcount(Capacity) == 1);
     RingBuffer() : data{static_cast<T *>(malloc(sizeof(T) * Capacity))}, head{0}, tail{0} {
         if (data.get() == nullptr) {
@@ -40,11 +39,7 @@ public:
 
     [[nodiscard]] std::size_t size() const noexcept {
         assert(check());
-        if (tail >= head) {
-            return tail - head;
-        } else {
-            return Capacity + tail - head;
-        }
+        return _size;
     }
 
     template<typename... Args>
@@ -54,6 +49,7 @@ public:
 
         new(&data[tail]) T(std::forward<Args>(args)...);
         tail = next(tail);
+        ++_size;
     }
 
     const T &front() const {
@@ -74,20 +70,29 @@ public:
         data[head].~T();
 
         head = next(head);
+        --_size;
     }
 
 private:
     std::unique_ptr<T[], Free<T>> data;
     std::size_t head;
     std::size_t tail;
+    std::size_t _size;
 
     [[nodiscard]] std::size_t next(std::size_t current) const noexcept {
         return (current + 1) % Capacity;
     }
 
-    bool check() const {
+    [[nodiscard]] bool check() const {
         assert(head < Capacity);
         assert(tail < Capacity);
+        if (tail > head) {
+            assert(_size == tail - head);
+        } else if(tail < head) {
+            assert(_size == Capacity + tail - head);
+        } else {
+            assert(_size == Capacity || _size == 0);
+        }
         return true;
     }
 };

@@ -109,7 +109,7 @@ private:
     L3OrderBook<L3Vec> &lob;
     std::vector<BacktestListener *> ls;
 
-    constexpr static int RING_BUFFER_CAPACITY = 1 << 12;
+    constexpr static int RING_BUFFER_CAPACITY = (1 << 12);
 
     RingBuffer<std::pair<TimeNs, InboundMsg>, RING_BUFFER_CAPACITY> exchangeToStrat;
     RingBuffer<std::pair<TimeNs, OutboundMsg>, RING_BUFFER_CAPACITY> stratToExchange;

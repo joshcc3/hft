@@ -46,7 +46,7 @@ template<typename PP>
 struct UDPBuffer {
     using MaskType = u64;
     constexpr static int Sz = 64;
-    constexpr static int UNPROCESSED_SZ = 1 << 10;
+    constexpr static int UNPROCESSED_SZ = (1 << 10);
     constexpr static MaskType ONES = ~MaskType(0);
     static_assert(__builtin_popcount(Sz) == 1);
     static_assert(Sz == 64);

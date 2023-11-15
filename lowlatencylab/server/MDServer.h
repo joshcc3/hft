@@ -34,7 +34,7 @@ public:
 
     using gzip_streambuf = boost::iostreams::filtering_streambuf<boost::iostreams::input>;
 
-    static constexpr u64 MD_SEND_TAG = 3;
+    static constexpr u64 MD_SEND_TAG = 4;
     static constexpr int SND_BUF_SZ = 1 << 8;
     static constexpr int SND_BUF_HIGH_WATERMARK = int(SND_BUF_SZ * 0.7);
     static constexpr int PACKET_SIZE = sizeof(MDPacket) * 5;

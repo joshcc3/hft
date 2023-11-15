@@ -122,10 +122,17 @@ public:
                                     } else {
                                         assert(false);
                                     }
-                                } else if (userData == OEServer::BUFFER_TAG) {
+                                } else if (userData == OEServer::BUFFER_ADD_TAG) {
                                     [[maybe_unused]] u64 completionRes = e.res;
                                     [[maybe_unused]] u64 completionTag = e.user_data;
                                     assert(e.res == OEServer::NUM_BUFFERS || e.res == 0);
+                                } else if (userData == OEServer::BUFFER_REMOVE_TAG) {
+                                    auto completionRes = e.res;
+                                    if (completionRes <= 0) {
+                                        cerr << "Failed to dealloc buffers [" << completionRes << "] [" << userData
+                                             << "]." << endl;
+                                        assert(false);
+                                    }
                                 } else {
                                     assert(false);
                                 }
