@@ -79,13 +79,17 @@ public:
                             int i = 0;
                             strat.recvUdpMD();
                     )
-                    if((++counter1 & 0x1fff) == 0) {
+                    int modulus = 0x1f;
+                    if((++counter1 & modulus) == 0) {
+                        static double prevTimeSpent = timeSpent[0];
+                        cout << "Prev Time Spend [" << (timeSpent[0] - prevTimeSpent) * 1'000'000.0 / (modulus + 1) << "us]" << '\n';
                         cout << "Total Packet Proc [" << timeSpent[0] * 1'000'000.0 / counter1 << "us]" << '\n';
                         cout << "Book update [" << timeSpent[1] / timeSpent[0] * 100 << "%]" << '\n';
                         cout << "Order Submission [" << timeSpent[2] / timeSpent[0] * 100 << "%]" << '\n';
                         cout << "Message Handling [" << timeSpent[3] / timeSpent[0] * 100 << "%]" << '\n';
                         cout << "Recv [" << timeSpent[4] / timeSpent[0] * 100 << "%]" << '\n';
-                        cout << "----------------------" << endl;
+                        cout << "----------------------" << '\n';
+                        prevTimeSpent = timeSpent[0];
                     }
                     assert(std::abs(currentTimeNs() - strat.lastReceivedNs) < 1'000'000);
 
