@@ -22,7 +22,7 @@
 #include <iostream>
 #include <unordered_map>
 
-//#define NDEBUG
+#define NDEBUG
 
 #ifdef NDEBUG
 #undef assert
@@ -320,7 +320,7 @@ inline bool checkMessageDigest(const u8 *buf, ssize_t bytes) {
     const MDPacket &p = *reinterpret_cast<const MDPacket *>(buf);
 
     const auto &[e, inserted] = seenHashes.emplace(p.seqNo, p);
-
+    assert(false);
     assert(inserted);
     return true;
 }
