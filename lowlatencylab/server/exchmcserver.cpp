@@ -39,8 +39,8 @@ class Exchange {
 
 public:
     Exchange(std::ifstream &f, const string &headerLine, const string &outputFileN)
-            : state(ExchangeState::INIT), ioState(), oe{ioState, md, outputFileN},
-              md{ioState, f, headerLine} {
+            : state(ExchangeState::INIT), ioState{false}, oe{ioState, md, outputFileN},
+              md{ioState, MD_UNICAST_HOSTNAME, f, headerLine} {
         assert(io_uring_sq_ready(&ioState.ring) == 0);
     }
 
@@ -237,8 +237,9 @@ private:
 };
 
 int main() {
-    const string &ofname = "/home/jc/CLionProjects/hft/data/trades_500M.csv";
-    const string &fname = "/home/jc/CLionProjects/hft/data/deribit_incremental_book_L2_2020-04-01_BTC-PERPETUAL.csv.gz";
+    const string &ofname = "data/trades_500M.csv";
+    // const string &fname = "data/deribit_incremental_book_L2_2019-07-01_BTC-PERPETUAL.csv.gz";
+    const string &fname = "data/l2_mine.csv.gz";
     std::ifstream ifile(fname, std::ios_base::in | std::ios_base::binary);
     if (!ifile) {
         std::cerr << "Failed to open the file." << std::endl;

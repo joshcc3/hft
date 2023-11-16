@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <unistd.h>
 #include <cstring>
+#include <sched.h>
 
 
 enum class StrategyState {
@@ -27,12 +28,13 @@ class Driver {
 
     StrategyState state = StrategyState::INIT;
 
-    IOUringState ioState{};
+    IOUringState ioState{true};
     int fileTable[1]{};
 
+    XDPIO io{"lo", "/sys/fs/bpf/strat"};
     L2OB ob{};
-    OE oe{ioState};
-    Strat strat{oe, ob};
+    OE oe{ioState, "lll-1.oe"};
+    Strat strat{oe, ob, io};
 
 public:
 
@@ -42,17 +44,12 @@ public:
             assert(stateCheck());
             switch (state) {
                 case StrategyState::INIT: {
-                    assert(strat.mdFD != -1);
                     assert(!oe.isConnected());
-                    assert(fileTable[0] != strat.mdFD);
-                    fileTable[0] = strat.mdFD;
-                    io_uring_register_files(&ioState.ring, fileTable, 1);
 
                     state = StrategyState::OE_CONNECT;
                     break;
                 }
                 case StrategyState::OE_CONNECT: {
-                    assert(strat.mdFD != -1);
                     assert(!oe.isConnected());
                     assert(io_uring_sq_ready(&ioState.ring) == 0);
                     assert(io_uring_cq_ready(&ioState.ring) == 0);
@@ -78,10 +75,10 @@ public:
                     CLOCK(TOT_RECV_PC,
                             strat.recvUdpMD();
                     )
-                    int modulus = 0x1fff;
+                    const int modulus = 0;
                     if(__builtin_expect((++counter1 & modulus) == 0, false)) {
 //                    if((++counter1 & modulus) == 0) {
-                        TimeNs cTime = currentTimeNs();
+const TimeNs cTime = currentTimeNs();
                         cout << "Iters [" << counter1 << "]" << '\n';
                         cout << "Prev Avg Loop Time [" << (cTime - prevCheckpoint) / 1'000.0 / (modulus + 1) << "us]" << '\n';
                         cout << "Prev Time Spend [" << (GET_PC(0) - prevTimeSpent) * 1'000'000.0 / (modulus + 1) << "us]" << '\n';
@@ -106,7 +103,7 @@ public:
 #pragma ide diagnostic ignored "NullDereference"
                             io_uring_cqe &e = *cqe;
 #pragma clang diagnostic pop
-                            u64 userData = io_uring_cqe_get_data64(&e);
+                            const u64 userData = io_uring_cqe_get_data64(&e);
                             if (userData >= OE::ORDER_TAG) {
                                 oe.completeMessage(e);
                             } else {
@@ -169,8 +166,7 @@ public:
 };
 
 int main() {
-
-    auto numCores = sysconf(_SC_NPROCESSORS_ONLN);
+    const auto numCores = sysconf(_SC_NPROCESSORS_ONLN);
     if (numCores < 0) {
         perror("sysconf");
         exit(EXIT_FAILURE);
@@ -190,6 +186,17 @@ int main() {
         exit(EXIT_FAILURE);
     }
     assert(CPU_ISSET(PINNED_CPU, &cpuset));
+
+    sched_param schparam{};
+    const int receiveThreadPolicy = SCHED_FIFO;
+    const int priority = 99; // sched_get_priority_max(receiveThreadPolicy);
+    schparam.sched_priority = priority;
+    ret = sched_setscheduler(0, receiveThreadPolicy, &schparam);
+
+    if (ret) {
+        cerr << "Error [" << errno << " in setting priority: " << strerror(errno) << endl;
+        exit(EXIT_FAILURE);
+    }
 
     Driver s{};
     s.run();

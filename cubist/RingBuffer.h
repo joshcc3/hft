@@ -5,15 +5,14 @@
 
 
 #include <cstddef>
-#include <vector>
 #include <cassert>
 #include <memory>
-
+#include <cstdlib>
 
 template<typename T>
 struct Free {
     void operator()(T *ptr) {
-        std::free(ptr);
+        free(ptr);
     }
 };
 
@@ -21,7 +20,7 @@ template<typename T, std::size_t Capacity>
 class RingBuffer {
 public:
     static_assert(__builtin_popcount(Capacity) == 1);
-    RingBuffer() : data{static_cast<T *>(malloc(sizeof(T) * Capacity))}, head{0}, tail{0} {
+    RingBuffer() : data{static_cast<T *>(malloc(sizeof(T) * Capacity))}, head{0}, tail{0}, _size{0} {
         if (data.get() == nullptr) {
             throw std::bad_alloc();
         }
@@ -30,7 +29,6 @@ public:
     static_assert(Capacity > 0, "Capacity must be positive.");
 
     [[nodiscard]] bool empty() const noexcept {
-        assert((head == tail) == (_size == Capacity));
         return head == tail;
     }
 

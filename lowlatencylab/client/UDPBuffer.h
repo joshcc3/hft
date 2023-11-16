@@ -6,32 +6,16 @@
 #define LLL_EXCHANGE_UDPBUFFER_H
 
 #include <cstring>
-#include <cstdlib>
-#include <cstdio>
 #include <cassert>
 
-#include <unistd.h>
 #include <sched.h>
 
-#include <x86intrin.h>
-#include <arpa/inet.h>
-#include <netinet/tcp.h>
-#include <netinet/ip.h>
-#include <netinet/in.h>
-
 #include <new>
-#include <memory>
 
-#include <bitset>
 #include <array>
-#include <deque>
 
 #include "../defs.h"
 
-#include "Strat.h"
-#include "OE.h"
-#include "L2OB.h"
-#include "mdmcclient.h"
 #include "../../cubist/RingBuffer.h"
 
 template<typename Derived>
@@ -166,6 +150,7 @@ struct UDPBuffer {
         MaskType alignedMask = rotr(mask, head);
         assert(rotl(alignedMask, head) == mask);
         MaskType fullMask = nOnes(n);
+        assert(__builtin_popcount(fullMask) == n);
         assert((fullMask & alignedMask) == fullMask);
         MaskType updatedAlignedMask = alignedMask & ~fullMask;
         mask = rotl(updatedAlignedMask, head);

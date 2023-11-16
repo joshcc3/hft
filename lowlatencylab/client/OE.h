@@ -23,6 +23,8 @@
 #include "../defs.h"
 #include "L2OB.h"
 #include "mdmcclient.h"
+#include <arpa/inet.h>
+#include <netdb.h>
 
 class OE {
 public:
@@ -30,7 +32,7 @@ public:
 
     constexpr static u64 ORDER_TAG = 3;
 
-    IOUringState &ioState;
+    IOUringState& ioState;
     int clientFD = -1;
     OrderId orderId = 1;
 
@@ -40,7 +42,36 @@ public:
     char outputBuf[msgSize]{};
     Order curOrder;
 
-    explicit OE(IOUringState &ioState) : ioState{ioState} {}
+    explicit OE(IOUringState& ioState, const std::string& oeHost) : ioState{ioState} {
+        const addrinfo hints{
+            .ai_family = AF_INET,
+            .ai_socktype = SOCK_STREAM
+        };
+
+        addrinfo* res{};
+
+        int status;
+        if ((status = getaddrinfo(oeHost.c_str(), nullptr, &hints, &res)) != 0) {
+            std::cerr << "getaddrinfo: " << gai_strerror(status) << std::endl;
+            return;
+        }
+
+        assert(res->ai_next == nullptr);
+        assert(res != nullptr);
+        assert(res->ai_family == AF_INET);
+
+        serverAddr = *(sockaddr_in *) res->ai_addr;
+        assert(serverAddr.sin_family == AF_INET);
+
+        void* addr = &(serverAddr.sin_addr);
+        char ipstr[16];
+        inet_ntop(res->ai_family, addr, ipstr, sizeof ipstr);
+        std::cout << "OE Server: " << ipstr << std::endl;
+
+        serverAddr.sin_port = htons(OE_PORT);
+
+        freeaddrinfo(res); // free the linked list
+    }
 
     ~OE() {
         if (clientFD != -1) {
@@ -48,7 +79,6 @@ public:
                 perror("Failed to close OE socket");
             }
             clientFD = -1;
-
         }
     }
 
@@ -63,7 +93,7 @@ public:
             cerr << "Could not create oe server [" << errno << "]" << endl;
             exit(EXIT_FAILURE);
         }
-        assert(clientFD == 5); // assume that this is the second socket opened
+        assert(clientFD == 7); // assume that this is the second socket opened
 
         int enable = 1;
         if (setsockopt(clientFD, SOL_SOCKET, SO_DONTROUTE, &enable, sizeof(enable)) < 0) {
@@ -111,25 +141,21 @@ public:
             throw std::runtime_error("setsockopt(TCP_NODELAY) failed");
         }
 
+        assert(serverAddr.sin_addr.s_addr != 0);
+        assert(serverAddr.sin_port != 0);
 
-
-        serverAddr.sin_family = AF_INET;
-        serverAddr.sin_addr.s_addr = inet_addr("192.168.100.1"); // inet_addr("127.0.0.1");
-        serverAddr.sin_port = htons(OE_PORT);
-
-        if (connect(clientFD, (struct sockaddr *) &serverAddr, sizeof(serverAddr)) < 0) {
+        if (connect(clientFD, reinterpret_cast<sockaddr *>(&serverAddr), sizeof(serverAddr)) < 0) {
             perror("Bind to server socket failed.");
             close(clientFD);
             exit(EXIT_FAILURE);
         }
-
     }
 
     void submit(MDMsgId triggerEvent, TimeNs triggerRecvTime, PriceL price, Qty qty, OrderFlags flags) {
-/*
-    TODO - setup queue polling to avoid the system call for the kernel to automatically
-    pick up submits.
-*/
+        /*
+            TODO - setup queue polling to avoid the system call for the kernel to automatically
+            pick up submits.
+        */
 
         assert(clientFD != -1);
         assert(io_uring_sq_space_left(&ioState.ring) > 1);
@@ -138,7 +164,8 @@ public:
         TimeNs submitTime = currentTimeNs();
 
 
-        Order &o = *reinterpret_cast<Order *>(outputBuf);
+        Order& o = *reinterpret_cast<Order *>(outputBuf);
+        o.packetType = 2;
         o.submittedTime = submitTime;
         o.triggerEvent = triggerEvent;
         o.triggerReceivedTime = triggerRecvTime;
@@ -154,22 +181,24 @@ public:
         assert(o.price == price);
         assert(o.qty == qty);
 
-        io_uring_sqe *submitSqe = ioState.getSqe(o.id + ORDER_TAG);
+        io_uring_sqe* submitSqe = ioState.getSqe(o.id + ORDER_TAG);
         int sendFlags = MSG_DONTROUTE | MSG_DONTWAIT;
-        io_uring_prep_send(submitSqe, clientFD, static_cast<void *>(outputBuf), msgSize, sendFlags);
+        io_uring_prep_send(submitSqe, clientFD, outputBuf, msgSize, sendFlags);
         assert(submitSqe->flags == 0);
 
         assert(io_uring_sq_ready(&ioState.ring) == 1);
 
-        int submits = io_uring_submit(&ioState.ring);
+        assert((ioState.ring.sq.kflags & IORING_SQ_NEED_WAKEUP) == 0);
+
+        CLOCK(ORDER_SUBMISSION_PC,
+              int submits = io_uring_submit(&ioState.ring);
+        )
         assert(io_uring_sq_ready(&ioState.ring) == 0);
         assert(submits == 1);
 
         curOrder = o;
 
         assert(isConnected());
-
-
     }
 
     [[nodiscard]] bool isConnected() const noexcept {
@@ -180,13 +209,12 @@ public:
             } else {
                 return true;
             }
-
         } else {
             return false;
         }
     }
 
-    void completeMessage(io_uring_cqe &completion) {
+    void completeMessage(io_uring_cqe& completion) {
         auto curTime = currentTimeNs();
 
         assert(io_uring_cq_ready(&ioState.ring) >= 1);
@@ -201,7 +229,7 @@ public:
         OrderId receivedId = cUserData - ORDER_TAG;
 
         if (receivedId == curOrder.id) {
-            if(cRes <= 0) {
+            if (cRes <= 0) {
                 cerr << "Unexpected error code [" << cRes << "]" << endl;
                 throw std::runtime_error("Unexpected");
             }
@@ -210,10 +238,10 @@ public:
             assert(!(cFlags & IORING_CQE_F_NOTIF));
 
             // id, latency time,
-//            cout << curOrder.id << "," << double(curTime - curOrder.triggerReceivedTime) / 1000.0 << ","
-//                 << double(curTime - curOrder.submittedTime) / 1000.0 << '\n';
+            //            cout << curOrder.id << "," << double(curTime - curOrder.triggerReceivedTime) / 1000.0 << ","
+            //                 << double(curTime - curOrder.submittedTime) / 1000.0 << '\n';
         } else {
-//            cout << "Skipping [" << receivedId << "]." << '\n';
+            //            cout << "Skipping [" << receivedId << "]." << '\n';
         }
     }
 };
