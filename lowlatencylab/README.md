@@ -58,8 +58,14 @@ aggressive limit to the top level of the book on the other side.
 
 
 Use the packet system call to get packets directly from the link layer.
+use PACKET_QDISC_BYPASS
+MSG_ZEROCOPY for sending packets
+use packet_rx_ring - tools/testing/selftests/net/psock_tpacket.c
+look at AF_XDP instead 
+
 SO_RCVLOWAT and SO_SNDLOWAT
 IORING_SETUP_SQPOLL in io_uring_setup
+
 
 IORING_OP_SEND_ZC iouring flags
 
