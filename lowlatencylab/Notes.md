@@ -79,3 +79,53 @@ The recv is the bottleneck over here.
 ----
 Understanding bpf: https://docs.cilium.io/en/latest/bpf/architecture/
 
+
+----
+
+
+
+In high-frequency trading (HFT), performance is critical, and specific C++ libraries are favored for their efficiency. Here are examples focusing on containers, shared memory access, and networking:
+
+Containers:
+
+Boost.Container: Offers STL-compatible containers optimized for performance.
+Abseil: Google's open-source collection that includes high-performance data structures.
+Shared Memory Access:
+
+Boost.Interprocess: Facilitates shared memory communication, often used for low-latency inter-process communication in HFT systems.
+Intel TBB (Threading Building Blocks): Provides concurrent data structures and memory allocation optimization.
+Networking:
+
+ZeroMQ: A high-performance asynchronous messaging library, suitable for scalable distributed or concurrent applications.
+Asio (standalone or part of Boost): A cross-platform C++ library for network and low-level I/O programming, offering a consistent asynchronous model.
+These libraries are valued in HFT for their ability to minimize latency and maximize throughput, which are crucial in a field where milliseconds can make a significant difference.
+
+
+
+
+User
+give me 10 more
+ChatGPT
+Here are 10 additional high-performance C++ libraries often used in high-frequency trading (HFT), focusing on containers, shared memory access, and networking:
+
+folly (Facebook Open-source Library): Offers a variety of core libraries, including performant data structures.
+
+FlatBuffers (Google): Efficient cross-platform serialization library, useful for network communication.
+
+Cap'n Proto: A fast data interchange format and capability-based RPC system.
+
+nanomsg: A networking library for building scalable and fast distributed systems.
+
+Hazelcast C++ Client: In-memory data grid for distributed caching and computation.
+
+SPSCQueue: A single-producer, single-consumer lock-free queue for high-performance scenarios.
+
+TBB's concurrent_hash_map (Intel): Part of Threading Building Blocks, optimized for concurrent access.
+
+fastflow: A C++ parallel programming framework for shared memory.
+
+librdkafka: A high-performance C library implementation of the Apache Kafka protocol for distributed messaging.
+
+Seastar: An advanced, open-source C++ framework for high-performance server applications on modern hardware.
+
+These libraries are designed to maximize efficiency and speed, making them suitable for the demands of HFT environments.
