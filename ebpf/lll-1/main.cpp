@@ -163,7 +163,6 @@ static int lookup_bpf_map(int prog_fd)
 	return xsks_map_fd;
 }
 
-
 class XSKUmem {
 public:
 
@@ -176,32 +175,32 @@ public:
     xsk_ring_cons completionQ{};
 
     XSKUmem() {
-      u64 size = NUM_FRAMES * FRAME_SIZE;
-      umemArea = static_cast<u8*>(mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0));
+        u64 size = NUM_FRAMES * FRAME_SIZE;
+        umemArea = static_cast<u8*>(mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0));
         if(umemArea == MAP_FAILED) {
             perror("UMEM mmap: ");
             exit(EXIT_FAILURE);
         }
-	printf("Buffer addr: %lx\n", u64(umemArea));
-	assert((u64(umemArea) & (getpagesize() - 1)) == 0);
+	    printf("Buffer addr: %lx\n", u64(umemArea));
+	    assert((u64(umemArea) & (getpagesize() - 1)) == 0);
 
-	/*
-        xsk_umem_config cfg = {
-            .fill_size = XSK_RING_PROD__DEFAULT_NUM_DESCS * 2,
-            .comp_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
-            .frame_size = FRAME_SIZE,
-            .frame_headroom = XSK_UMEM__DEFAULT_FRAME_HEADROOM,
-            .flags = XSK_UMEM__DEFAULT_FLAGS
-	    };
-	    This config doesn't seem to work properly.
-	*/
+	    /*
+            xsk_umem_config cfg = {
+                .fill_size = XSK_RING_PROD__DEFAULT_NUM_DESCS * 2,
+                .comp_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
+                .frame_size = FRAME_SIZE,
+                .frame_headroom = XSK_UMEM__DEFAULT_FRAME_HEADROOM,
+                .flags = XSK_UMEM__DEFAULT_FLAGS
+	        };
+	        This config doesn't seem to work properly.
+	    */
         int res = xsk_umem__create(&umem,
                              umemArea, size,
                              &fillQ,
                              &completionQ,
-			     NULL);
+			                 NULL);
         if(res != 0) {
-	  perror("Umem create: " );
+	        perror("Umem create: " );
             cerr << "Errno: " << -res << endl;
             exit(EXIT_FAILURE);
         }
@@ -415,6 +414,9 @@ public:
         if(packetBuffered) {
             xsk_ring_prod__submit(tx, 1);
             packetBuffered = false;
+            return true;
+        } else {
+            return false;
         }
     }
 
@@ -511,11 +513,13 @@ public:
 
     	    const PacketIn* packet = static_cast<PacketIn*>(xdp.umem.umemArea + addrOffset);
             ob.update(desc, *packet);
-            *xsk_ring_prod__fill_addr(&xdp.umem.fillQ, idxFillQ++) = addrOffset;
+            if(!s.packetBuffered) {
+                *xsk_ring_prod__fill_addr(&xdp.umem.fillQ, idxFillQ++) = addrOffset;
+            }
         }
-
-        xsk_ring_prod__submit(&xdp.umem.fillQ, entries);
-        s.trigger();
+        if(!s.trigger()) {
+            xsk_ring_prod__submit(&xdp.umem.fillQ, entries);
+        }
         xsk_ring_cons__release(&xdp.xsk.rx, entries);
         xdp.xsk.ring_stats.rx_frags += entries;
 
