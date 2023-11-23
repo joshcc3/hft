@@ -1,17 +1,10 @@
 #include <linux/if_ether.h>
 
+#include <cstdio>
+#include <cstdint>
 
-static void swap_mac_addresses(void *data)
-{
-    struct ether_header *eth = (struct ether_header *)data;
-    struct ether_addr *src_addr = (struct ether_addr *)&eth->ether_shost;
-    struct ether_addr *dst_addr = (struct ether_addr *)&eth->ether_dhost;
-    struct ether_addr tmp;
-
-    tmp = *src_addr;
-    *src_addr = *dst_addr;
-    *dst_addr = tmp;
-}
+using u8 = uint8_t;
+using u64 = uint64_t;
 
 static void hex_dump(u8 *pkt, size_t length, u64 addr) {
     const unsigned char *address = (unsigned char *)pkt;

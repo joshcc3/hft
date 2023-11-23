@@ -1,3 +1,4 @@
+#include "defs.h"
 #include <errno.h>
 #include <getopt.h>
 #include <libgen.h>
@@ -52,19 +53,35 @@ using u64 = uint64_t;
 using Price = int;
 using Qty = int;
 
-struct data_in {
+struct market_data {
     int seqId;
-    char side;
     Price price;
     Qty qty;
-};
+    char side;
+} __attribute__ ((packed));
 
 struct PacketIn {
     struct ethhdr eth;
     struct iphdr ip;
     struct udphdr udp;
-    struct data_in dat;
-};
+    char _padding[6];
+    struct market_data md;
+} __attribute__ ((packed)) ;
+
+struct order_data {
+    int seqId;
+    Price price;
+    char side;
+    int seqIdOut;
+} __attribute__ ((packed));
+
+struct PacketOut {
+    struct ethhdr eth;
+    struct iphdr ip;
+    struct udphdr udp;
+    char _padding[6];
+    struct order_data od;
+} __attribute__ ((packed)) ;
 
 
 struct xsk_ring_stats {
@@ -316,20 +333,6 @@ public:
   }
 };
 
-struct Payload {
-    int seqNoIn;
-    int seqNoOut;
-    Price price;
-    char side;
-};
-
-struct PacketOut {
-    ethhdr eth;
-    iphdr ip;
-    udphdr udp;
-    Payload payload;
-};
-
 class Sender {
 public:
     static_assert(sizeof(PacketOut) <= XSKUmem::FRAME_SIZE);
@@ -372,37 +375,41 @@ public:
         assert(umemLoc->eth.h_source[0] == 0 && umemLoc->eth.h_source[1] == 0 && umemLoc->eth.h_source[2] == 0 && umemLoc->eth.h_source[3] == 0);
         assert(umemLoc->eth.h_proto == htons(ETH_P_IP));
 
-        assert(umemLoc->ip.frag_off == 0);
+        //assert(umemLoc->ip.frag_off == 0);
         assert(umemLoc->ip.ttl != 0);
         assert(umemLoc->ip.protocol == 17);
+        assert(umemLoc->ip.tot_len == htons(sizeof(PacketIn)));
 
-        umemLoc->ip.tot_len = htons(sizeof(PacketOut));
+	umemLoc->ip.tot_len = htons(sizeof(PacketOut));	
+	
         umemLoc->ip.ttl = htons(255);
 
         umemLoc->ip.check = 0;
         u32 csum = 0;
-        u16* dataptr = reinterpret_cast<u16*>(&umemLoc->ip);
-        for(int i = 0; i < sizeof(iphdr)/sizeof(u16); ++i) {
-            csum += dataptr[i];
+        u8* dataptr = reinterpret_cast<u8*>(&umemLoc->ip);
+        for(int i = 0; i < sizeof(iphdr)/sizeof(u8); i += 2) {
+	  u16 dat = (u16(dataptr[i]) << 8) | u16(dataptr[i + 1]);
+            csum += dat;
         }
         csum = (csum & 0xffff) + (csum >> 16);
         csum = (csum & 0xffff) + (csum >> 16);
         umemLoc->ip.check = ~u16(csum);
 
-        constexpr int udpPacketSz = sizeof(udphdr) + sizeof(Payload);
+        constexpr int udpPacketSz = sizeof(udphdr) + sizeof(order_data);
         umemLoc->udp.len = udpPacketSz;
         umemLoc->udp.check = 0;
 
         // TODO - swap udp header source and destination as well.
-        umemLoc->payload.seqNoIn = seqNoIn;
-        umemLoc->payload.seqNoOut = seqNoOut;
-        umemLoc->payload.price = price;
-        umemLoc->payload.side = side;
+        umemLoc->od.seqId = seqNoIn;
+        umemLoc->od.seqIdOut = seqNoOut;
+        umemLoc->od.price = price;
+        umemLoc->od.side = side;
 
         csum = 0;
-        dataptr = reinterpret_cast<u16*>(&umemLoc->udp);
-        for(int i = 0; i < udpPacketSz / sizeof(u16); ++i) {
-            csum += dataptr[i];
+        dataptr = reinterpret_cast<u8*>(&umemLoc->udp);
+        for(int i = 0; i < udpPacketSz / sizeof(u8); i += 2) {
+	  u16 dat = (u16(dataptr[i]) << 8) | u16(dataptr[i + 1]);
+            csum += dat;
         }
         csum = (csum & 0xffff) + (csum >> 16);
         csum = (csum & 0xffff) + (csum >> 16);
@@ -450,7 +457,7 @@ public:
     }
 
     void update(const struct xdp_desc* readDesc, const PacketIn& packet) {
-        struct data_in p = packet.dat;
+        market_data p = packet.md;
         if(p.side == 'b') {
             if(p.qty == 0) {
                bids.erase(p.price);
@@ -512,8 +519,19 @@ public:
             u32 len = desc->len;
             assert(addrOffset == xsk_umem__extract_addr(addrOffset));
 
-	    assert((u64(xdp.umem.umemArea + addrOffset) & (XSKUmem::FRAME_SIZE - 1)) == 0);
-    	    const PacketIn* packet = reinterpret_cast<PacketIn*>(xdp.umem.umemArea + addrOffset);
+	    u8* packetData = xdp.umem.umemArea + addrOffset;
+	    assert((u64(packetData) & 127) == 0);
+    	    const PacketIn* packet = reinterpret_cast<PacketIn*>(packetData);
+	    hex_dump(packetData, sizeof(PacketIn), addrOffset);
+
+	    assert(packet->eth.h_proto == htons(ETH_P_IP));
+	    assert(packet->ip.version == 4);
+	    assert(packet->ip.ihl == 5);
+	    assert(htons(packet->ip.tot_len) == sizeof(PacketIn) - sizeof(ethhdr));
+	    //assert((packet->ip.frag_off & 0x1fff) == 0);
+	    assert(((packet->ip.frag_off >> 13) & 1) == 0);
+	    assert(((packet->ip.frag_off >> 15) & 1) == 0);	    
+	    assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
             ob.update(desc, *packet);
             if(!s.packetBuffered) {
                 *xsk_ring_prod__fill_addr(&xdp.umem.fillQ, idxFillQ++) = addrOffset;
