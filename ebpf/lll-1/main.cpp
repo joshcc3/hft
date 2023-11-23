@@ -359,7 +359,7 @@ public:
 
 
         u32 txIdx = -1;
-        assert(tx != nullptr && tx >= (void*)(0x7fffff0000000000));
+        assert(tx != nullptr && tx >= (void*)(0x7fffff000000));
         int txSlotsRecvd = xsk_ring_prod__reserve(tx, 1, &txIdx);
         assert(txIdx >= 0 && txIdx < XSK_RING_PROD__DEFAULT_NUM_DESCS);
         assert(txSlotsRecvd == 1);
@@ -370,7 +370,7 @@ public:
         txDescr->len = sizeof(PacketOut);
         txDescr->options = 0;
 
-        PacketOut* umemLoc = reinterpret_cast<PacketOut*>(umem.umemArea + readDesc->addr * XSKUmem::FRAME_SIZE);
+        PacketOut* umemLoc = reinterpret_cast<PacketOut*>(umem.umemArea + readDesc->addr);
         assert(umemLoc->eth.h_dest[0] == 0 && umemLoc->eth.h_dest[1] == 0 && umemLoc->eth.h_dest[2] == 0 && umemLoc->eth.h_dest[3] == 0);
         assert(umemLoc->eth.h_source[0] == 0 && umemLoc->eth.h_source[1] == 0 && umemLoc->eth.h_source[2] == 0 && umemLoc->eth.h_source[3] == 0);
         assert(umemLoc->eth.h_proto == htons(ETH_P_IP));
@@ -378,9 +378,10 @@ public:
         //assert(umemLoc->ip.frag_off == 0);
         assert(umemLoc->ip.ttl != 0);
         assert(umemLoc->ip.protocol == 17);
-        assert(umemLoc->ip.tot_len == htons(sizeof(PacketIn)));
+        assert(umemLoc->ip.tot_len == (htons(sizeof(PacketIn) - sizeof(ethhdr))));
 
-	umemLoc->ip.tot_len = htons(sizeof(PacketOut));	
+	umemLoc->ip.tos = 7;
+	umemLoc->ip.tot_len = htons(sizeof(PacketOut) - sizeof(ethhdr));	
 	
         umemLoc->ip.ttl = htons(255);
 
@@ -395,7 +396,7 @@ public:
         csum = (csum & 0xffff) + (csum >> 16);
         umemLoc->ip.check = ~u16(csum);
 
-        constexpr int udpPacketSz = sizeof(udphdr) + sizeof(order_data);
+        constexpr int udpPacketSz = sizeof(PacketOut) - sizeof(ethhdr) - sizeof(iphdr);
         umemLoc->udp.len = udpPacketSz;
         umemLoc->udp.check = 0;
 
@@ -405,15 +406,8 @@ public:
         umemLoc->od.price = price;
         umemLoc->od.side = side;
 
-        csum = 0;
-        dataptr = reinterpret_cast<u8*>(&umemLoc->udp);
-        for(int i = 0; i < udpPacketSz / sizeof(u8); i += 2) {
-	  u16 dat = (u16(dataptr[i]) << 8) | u16(dataptr[i + 1]);
-            csum += dat;
-        }
-        csum = (csum & 0xffff) + (csum >> 16);
-        csum = (csum & 0xffff) + (csum >> 16);
-        umemLoc->udp.check = ~u16(csum);
+	// Send an all 0 checksum to indicate no checksum was calculated
+        umemLoc->udp.check = 0;
         packetBuffered = true;
         ++seqNoOut;
     }
@@ -451,8 +445,8 @@ class OB {
 public:
     map<Price, Qty> bids;
     map<Price, Qty> asks;
-    Sender s;
-    OB(const Sender& s): s{s}, bids{}, asks{} {
+    Sender& s;
+    OB(Sender& s): s{s}, bids{}, asks{} {
 
     }
 
