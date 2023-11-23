@@ -53,6 +53,10 @@ using u64 = uint64_t;
 using Price = int;
 using Qty = int;
 
+
+constexpr inline int PACKET_TYPE_MD = 1;
+constexpr inline int PACKET_TYPE_OE = 2;
+
 struct market_data {
     int seqId;
     Price price;
@@ -64,7 +68,8 @@ struct PacketIn {
     struct ethhdr eth;
     struct iphdr ip;
     struct udphdr udp;
-    char _padding[6];
+    u8 packetType;
+    char _padding[5];
     struct market_data md;
 } __attribute__ ((packed)) ;
 
@@ -79,6 +84,7 @@ struct PacketOut {
     struct ethhdr eth;
     struct iphdr ip;
     struct udphdr udp;
+    u8 packetType;
     char _padding[6];
     struct order_data od;
 } __attribute__ ((packed)) ;
@@ -129,7 +135,7 @@ struct XDPConfig {
     u16 bindFlags{};
     u32 xdpMode{};
     u32 libxdpFlags{};
-}
+};
 
 
 static int lookup_bpf_map(int prog_fd)
@@ -364,7 +370,7 @@ public:
 
 
         u32 txIdx = -1;
-        assert(tx != nullptr && tx >= (void*)(0x7fffff000000));
+        assert(tx != nullptr);
         int txSlotsRecvd = xsk_ring_prod__reserve(tx, 1, &txIdx);
         assert(txIdx >= 0 && txIdx < XSK_RING_PROD__DEFAULT_NUM_DESCS);
         assert(txSlotsRecvd == 1);
@@ -389,7 +395,6 @@ public:
 	    umemLoc->ip.tot_len = htons(sizeof(PacketOut) - sizeof(ethhdr));
 
         umemLoc->ip.ttl = htons(255);
-
         umemLoc->ip.check = 0;
         u32 csum = 0;
         u8* dataptr = reinterpret_cast<u8*>(&umemLoc->ip);
@@ -404,8 +409,13 @@ public:
         constexpr int udpPacketSz = sizeof(PacketOut) - sizeof(ethhdr) - sizeof(iphdr);
         umemLoc->udp.len = udpPacketSz;
         umemLoc->udp.check = 0;
+	umemLoc->udp.dest = htons(4321);
+
+	
+	umemLoc->packetType = PACKET_TYPE_OE;
 
         // TODO - swap udp header source and destination as well.
+
         umemLoc->od.seqId = seqNoIn;
         umemLoc->od.seqIdOut = seqNoOut;
         umemLoc->od.price = price;
@@ -421,11 +431,11 @@ public:
         if(packetBuffered) {
             xsk_ring_prod__submit(tx, 1);
 
-            assert(((sock.socketCfg.bindFlags & XDP_CPY) != 0) == xsk_ring_prod__needs_wakeup(tx));
+            assert(((sock.socketCfg.bindFlags & XDP_COPY) != 0) == xsk_ring_prod__needs_wakeup(tx));
             if(xsk_ring_prod__needs_wakeup(tx)) {
                 // TODO - this is onyl needed in COPY mode, not needed for zero-copy mode, driven by the napi loop
                 assert(sock.xskFD > 2);
-                assert((sock.socketCfg.bindFlags & XDP_CPY) != 0);
+                assert((sock.socketCfg.bindFlags & XDP_COPY) != 0);
                 int ret = sendto(sock.xskFD, NULL, 0, MSG_DONTWAIT, NULL, 0);
 
                 if (!(ret >= 0 || errno == ENOBUFS || errno == EAGAIN ||
@@ -448,6 +458,7 @@ public:
         assert(idx >= 0);
         if (rcvd > 0) {
             xsk_ring_cons__release(cq, rcvd);
+	    // TODO - release to the fill queue over here as well
         }
     }
 
@@ -533,7 +544,7 @@ public:
             assert(addrOffset == xsk_umem__extract_addr(addrOffset));
 
             assert(xdp.umem.umemArea + addrOffset == xsk_umem__get_data(xdp.umem.umemArea, addrOffset));
-	        u8* packetData = xsk_umem__get_data(xdp.umem.umemArea, addrOffset);
+	    u8* packetData = static_cast<u8*>(xsk_umem__get_data(xdp.umem.umemArea, addrOffset));
 	        assert((u64(packetData) & 127) == 0);
     	    const PacketIn* packet = reinterpret_cast<PacketIn*>(packetData);
 	        hex_dump(packetData, sizeof(PacketIn), addrOffset);
@@ -546,6 +557,7 @@ public:
 	        assert(((packet->ip.frag_off >> 13) & 1) == 0);
 	        assert(((packet->ip.frag_off >> 15) & 1) == 0);
 	        assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
+		assert(packet->packetType == PACKET_TYPE_MD);
             ob.update(desc, *packet);
             if(!s.packetBuffered) {
                 *xsk_ring_prod__fill_addr(&xdp.umem.fillQ, idxFillQ++) = addrOffset;
@@ -573,7 +585,7 @@ int main(int argc, char **argv) {
         .xdpMode = XDP_FLAGS_DRV_MODE,
         .libxdpFlags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD,
     };
-    XDPManager xdp{socketConfig};
+    XDPManager xdp{cfg};
 
     Sender s{xdp};
     OB ob(s);
