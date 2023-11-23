@@ -125,6 +125,12 @@ struct xsk_app_stats {
     unsigned long prev_opt_polls;
 };
 
+struct XDPConfig {
+    u16 bindFlags{};
+    u32 xdpMode{};
+    u32 libxdpFlags{};
+}
+
 
 static int lookup_bpf_map(int prog_fd)
 {
@@ -269,19 +275,18 @@ public:
     xsk_driver_stats drv_stats{};
     u32 outstanding_tx{};
     int xskFD = -1;
+    const XDPConfig& socketCfg;
 
     int if_index = if_nametoindex("lo");
 
-    XSKSocket(XSKUmem& umem, XDPProgram& prog): umem{umem}, xdp_prog{prog} {
+    XSKSocket(XSKUmem& umem, XDPProgram& prog, const XDPConfig& socketCfg): umem{umem}, xdp_prog{prog}, socketCfg{socketCfg} {
 
-        u16 bindFlags = XDP_COPY; // TODO - change to use zero copy
-        bindFlags &= ~XDP_USE_NEED_WAKEUP; // do not handle partial frames
         xsk_socket_config cfg {
             .rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
             .tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS,
-            .libxdp_flags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD,
-            .xdp_flags = XDP_FLAGS_DRV_MODE,
-            .bind_flags = bindFlags
+            .libxdp_flags = socketCfg.libxdpFlags,
+            .xdp_flags = socketCfg.xdpMode,
+            .bind_flags = socketCfg.bindFlags
         };
 
         int ret = xsk_socket__create(&xsk, "lo", QUEUE_NUM, umem.umem, &rx, &tx, &cfg);
@@ -293,14 +298,14 @@ public:
         xskFD = xsk_socket__fd(xsk);
         assert(xskFD > 2 && xskFD < 20);
 
-	assert(!IS_ERR_OR_NULL(xdp_prog.program));
-	cout << "XSK Socket FD " << xskFD << endl;
+	    assert(!IS_ERR_OR_NULL(xdp_prog.program));
+	    cout << "XSK Socket FD " << xskFD << endl;
 
-	int programFD = xdp_program__fd(xdp_prog.program);
+	    int programFD = xdp_program__fd(xdp_prog.program);
         int xsks_map = lookup_bpf_map(programFD);
         if (xsks_map < 0) {
             fprintf(stderr, "ERROR: no xsks map found: %s\n",
-                strerror(xsks_map));
+            strerror(xsks_map));
             exit(EXIT_FAILURE);
         }
 
@@ -311,7 +316,7 @@ public:
             cerr << "bpf_map_update_elem Errno: " << -ret << endl;
             exit(EXIT_FAILURE);
         }
-	cout << "XSK init completed." << endl;
+	    cout << "XSK init completed." << endl;
 
     }
 
@@ -324,7 +329,7 @@ public:
   XSKUmem umem{};
   XSKSocket xsk;
 
-  XDPManager(): xsk{umem, program} {
+  XDPManager(const XDPConfig& cfg): xsk{umem, program, cfg} {
 
   }
 
@@ -380,16 +385,16 @@ public:
         assert(umemLoc->ip.protocol == 17);
         assert(umemLoc->ip.tot_len == (htons(sizeof(PacketIn) - sizeof(ethhdr))));
 
-	umemLoc->ip.tos = 7;
-	umemLoc->ip.tot_len = htons(sizeof(PacketOut) - sizeof(ethhdr));	
-	
+	    umemLoc->ip.tos = 7;
+	    umemLoc->ip.tot_len = htons(sizeof(PacketOut) - sizeof(ethhdr));
+
         umemLoc->ip.ttl = htons(255);
 
         umemLoc->ip.check = 0;
         u32 csum = 0;
         u8* dataptr = reinterpret_cast<u8*>(&umemLoc->ip);
         for(int i = 0; i < sizeof(iphdr)/sizeof(u8); i += 2) {
-	  u16 dat = (u16(dataptr[i]) << 8) | u16(dataptr[i + 1]);
+	        u16 dat = (u16(dataptr[i]) << 8) | u16(dataptr[i + 1]);
             csum += dat;
         }
         csum = (csum & 0xffff) + (csum >> 16);
@@ -415,6 +420,19 @@ public:
     bool trigger() {
         if(packetBuffered) {
             xsk_ring_prod__submit(tx, 1);
+
+            if(xsk_ring_prod__needs_wakeup(tx)) {
+                // TODO - this is onyl needed in COPY mode, not needed for zero-copy mode, driven by the napi loop
+                assert(sock.xskFD > 2);
+                assert((sock.socketCfg.bindFlags & XDP_CPY) != 0);
+                int ret = sendto(sock.xskFD, NULL, 0, MSG_DONTWAIT, NULL, 0);
+
+                if (!(ret >= 0 || errno == ENOBUFS || errno == EAGAIN ||
+                    errno == EBUSY || errno == ENETDOWN)) {
+                    perror("Kick did not work");
+                    exit(EXIT_FAILURE);
+                }
+            }
             packetBuffered = false;
             return true;
         } else {
@@ -548,7 +566,13 @@ public:
 
 int main(int argc, char **argv) {
 
-    XDPManager xdp;
+    // TODO - verify that these flags actually work.
+    XDPConfig cfg{
+        .bindFlags = XDP_COPY & (~XDP_USE_NEED_WAKEUP),
+        .xdpMode = XDP_FLAGS_DRV_MODE,
+        .libxdpFlags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD,
+    };
+    XDPManager xdp{socketConfig};
 
     Sender s{xdp};
     OB ob(s);
