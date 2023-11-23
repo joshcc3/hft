@@ -506,32 +506,34 @@ public:
             }
             ret = xsk_ring_prod__reserve(&xdp.umem.fillQ, entries, &idxFillQ);
         }
-	cout << "Received [" << entries << "]." << endl;
+	    cout << "Received [" << entries << "]." << endl;
         for(int i = 0; i < entries; ++i) {
             const struct xdp_desc *desc = xsk_ring_cons__rx_desc(&xdp.xsk.rx, idxRx++);
             u64 addrOffset = desc->addr;
             u32 len = desc->len;
             assert(addrOffset == xsk_umem__extract_addr(addrOffset));
 
-	    u8* packetData = xdp.umem.umemArea + addrOffset;
-	    assert((u64(packetData) & 127) == 0);
+            assert(xdp.umem.umemArea + addrOffset == xsk_umem__get_data(xdp.umem.umemArea, addrOffset));
+	        u8* packetData = xsk_umem__get_data(xdp.umem.umemArea, addrOffset);
+	        assert((u64(packetData) & 127) == 0);
     	    const PacketIn* packet = reinterpret_cast<PacketIn*>(packetData);
-	    hex_dump(packetData, sizeof(PacketIn), addrOffset);
+	        hex_dump(packetData, sizeof(PacketIn), addrOffset);
 
-	    assert(packet->eth.h_proto == htons(ETH_P_IP));
-	    assert(packet->ip.version == 4);
-	    assert(packet->ip.ihl == 5);
-	    assert(htons(packet->ip.tot_len) == sizeof(PacketIn) - sizeof(ethhdr));
-	    //assert((packet->ip.frag_off & 0x1fff) == 0);
-	    assert(((packet->ip.frag_off >> 13) & 1) == 0);
-	    assert(((packet->ip.frag_off >> 15) & 1) == 0);	    
-	    assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
+	        assert(packet->eth.h_proto == htons(ETH_P_IP));
+	        assert(packet->ip.version == 4);
+	        assert(packet->ip.ihl == 5);
+	        assert(htons(packet->ip.tot_len) == sizeof(PacketIn) - sizeof(ethhdr));
+	        //assert((packet->ip.frag_off & 0x1fff) == 0);
+	        assert(((packet->ip.frag_off >> 13) & 1) == 0);
+	        assert(((packet->ip.frag_off >> 15) & 1) == 0);
+	        assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
             ob.update(desc, *packet);
             if(!s.packetBuffered) {
                 *xsk_ring_prod__fill_addr(&xdp.umem.fillQ, idxFillQ++) = addrOffset;
             }
         }
         if(!s.trigger()) {
+            // TODO - update the fill q on a sender complete to indicate can be used for receiving
             xsk_ring_prod__submit(&xdp.umem.fillQ, entries);
         }
         xsk_ring_cons__release(&xdp.xsk.rx, entries);
