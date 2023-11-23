@@ -52,15 +52,18 @@ using u64 = uint64_t;
 using Price = int;
 using Qty = int;
 
-
-struct Packet {
-    struct ethhdr eth;
-    struct iphdr ip;
-    struct udphdr udp;
+struct data_in {
     int seqId;
     char side;
     Price price;
     Qty qty;
+};
+
+struct PacketIn {
+    struct ethhdr eth;
+    struct iphdr ip;
+    struct udphdr udp;
+    struct data_in dat;
 };
 
 
@@ -106,11 +109,10 @@ struct xsk_app_stats {
 };
 
 
-
 static int lookup_bpf_map(int prog_fd)
 {
   u32 i;
- 
+
    u32 num_maps;
   u32 prog_len = sizeof(struct bpf_prog_info);
 	u32 map_len = sizeof(struct bpf_map_info);
@@ -167,11 +169,11 @@ public:
 
     constexpr static int FRAME_SIZE = XSK_UMEM__DEFAULT_FRAME_SIZE;
     constexpr static int NUM_FRAMES = 4096;
-  
+
     xsk_umem *umem{};
     u8* umemArea{};
     xsk_ring_prod fillQ{};
-    xsk_ring_cons consumer{};
+    xsk_ring_cons completionQ{};
 
     XSKUmem() {
       u64 size = NUM_FRAMES * FRAME_SIZE;
@@ -196,7 +198,7 @@ public:
         int res = xsk_umem__create(&umem,
                              umemArea, size,
                              &fillQ,
-                             &consumer,
+                             &completionQ,
 			     NULL);
         if(res != 0) {
 	  perror("Umem create: " );
@@ -307,19 +309,129 @@ public:
   XSKSocket xsk;
 
   XDPManager(): xsk{umem, program} {
-    
+
   }
-  
+
   ~XDPManager() {
             exit(EXIT_FAILURE);
   }
 };
 
-
+struct Payload {
+    int seqNoIn;
+    int seqNoOut;
+    Price price;
+    char side;
+}
+struct PacketOut {
+    ethhdr eth;
+    iphdr ip;
+    udphdr udp;
+    Payload payload;
+};
 
 class Sender {
 public:
-  void trigger(char side, Price price, int seqNo) {}
+    static_assert(sizeof(PacketOut) <= XSKUmem::FRAME_SIZE);
+
+    XSKSocket& sock;
+    XSKUmem& umem;
+    int seqNoOut;
+    xsk_ring_prod* tx{};
+    xsk_ring_cons* cq{};
+
+    bool packetBuffered;
+
+    Sender(XDPManager& xdp):
+        sock{xdp.socket}, umem{xdp.umem}, seqNoOut{}, packetBuffered{false},
+        cq{&xdp.umem.completionQ}, tx{&xdp.socket.tx}    {
+    }
+
+    void prepare(xdp_desc* readDesc, char side, Price price, int seqNoIn) {
+        assert(!packetBuffered);
+        assert(readDesc->addr <= XSKUmem::FRAME_SIZE * (XSKUmem::NUM_FRAMES - 1));
+        assert(readDesc->len > 0);
+        assert(readDesc->options == 0);
+        assert(seqNoOut < seqNoIn);
+
+
+        int txIdx = -1;
+        assert(tx != null && tx >= 0x7fffff0000000000);
+        int txSlotsRecvd = xsk_ring_prod__reserve(tx, 1, &txIdx);
+        assert(txIdx >= 0 && txIdx < XSK_RING_PROD__DEFAULT_NUM_DESCS);
+        assert(txSlotsRecvd == 1);
+
+        struct xdp_desc *txDescr = xsk_ring_prod__tx_desc(tx, txIdx);
+        assert(nullptr != txDescr);
+        txDescr->addr = readDesc->addr;
+        txDescr->len = sizeof(PacketOut);
+        txDescr->options = 0;
+
+        PacketOut* umemLoc = reinterpret_cast<PacketOut*>(umem.umemArea + readDesc->addr * FRAME_SIZE);
+        assert(umemLoc->eth.h_dest[0] == 0 && umemLoc->eth.h_dest[1] == 0 && umemLoc->eth.h_dest[2] == 0 && umemLoc->eth.h_dest[3] == 0);
+        assert(umemLoc->eth.h_source[0] == 0 && umemLoc->eth.h_source[1] == 0 && umemLoc->eth.h_source[2] == 0 && umemLoc->eth.h_source[3] == 0);
+        assert(umemLoc->eth.h_proto == htons(ETH_P_IP));
+
+        assert(umemLoc.ip.frag_off == 0);
+        assert(umemLoc.ip.ttl != 0);
+        assert(umemLoc.ip.protocol == 17);
+
+        umemLoc.ip.totlen = htons(sizeof(PacketOut));
+        umemLoc.ip.ttl = htons(255);
+
+        umemLoc.ip.check = 0;
+        u32 csum = 0;
+        u16* dataptr = reinterpret_cast<u16*>(&umemLoc.ip);
+        for(int i = 0; i < sizeof(iphdr)/sizeof(u16); ++i) {
+            csum += dataptr[i];
+        }
+        csum = (csum & 0xffff) + (csum >> 16);
+        csum = (csum & 0xffff) + (csum >> 16);
+        umemLoc.ip.check = ~u16(csum);
+
+        constexpr int udpPacketSz = sizeof(udphdr) + sizeof(Payload);
+        umemLoc.len = udpPacketSz;
+        umemLoc.check = 0;
+
+        // TODO - swap udp header source and destination as well.
+        umemLoc.payload.seqNoIn = seqNoIn;
+        umemLoc.payload.seqNoOut = seqNoOut;
+        umemLoc.payload.price = price;
+        umemLoc.payload.side = side;
+
+        csum = 0;
+        dataptr = reinterpret_cast<u16*>(&umemLoc.udp);
+        for(int i = 0; i < udpPacketSz / sizeof(u16); ++i) {
+            csum += dataptr[i];
+        }
+        csum = (csum & 0xffff) + (csum >> 16);
+        csum = (csum & 0xffff) + (csum >> 16);
+        umemLoc.udp.check = ~u16(csum);
+        packetBuffered = true;
+        ++seqNo;
+    }
+
+    void trigger() {
+        if(packetBuffered) {
+            xsk_ring_prod__submit(tx, 1);
+            packetBuffered = false;
+        }
+    }
+
+    void complete() {
+        int idx = -1;
+        rcvd = xsk_ring_cons__peek(cq, 1, &idx);
+        assert(recvd >= 0);
+        assert(idx >= 0);
+        if (rcvd > 0) {
+            xsk_ring_cons__release(cq, rcvd);
+        }
+    }
+
+    void stateCheck() {
+        assert(tx != nullptr);
+        assert(cq != nullptr);
+    }
 
 };
 
@@ -334,13 +446,14 @@ public:
 
     }
 
-    void update(const Packet& p) {
+    void update(struct xdp_desc* readDesc, const PacketIn& packet) {
+        struct data_in p = packet.dat;
         if(p.side == 'b') {
             if(p.qty == 0) {
                bids.erase(p.price);
             } else {
                 if(p.price >= bids.begin()->first && p.qty > 1000) {
-                    s.trigger('b', p.price, p.seqId);
+                    s.prepare(readDesc, p.side, p.price, p.seqId)
                 }
                 const auto& [iter, added] = bids.emplace(p.price, p.qty);
                 iter->second = p.qty;
@@ -350,7 +463,7 @@ public:
                 asks.erase(p.price);
             } else {
                 if(p.price <= asks.begin()->first && p.qty > 1000) {
-                    s.trigger('a', p.price, p.seqId);
+                    s.prepare(readDesc, p.side, p.price, p.seqId)
                 }
                 const auto& [iter, added] = asks.emplace(p.price, p.qty);
                 iter->second = p.qty;
@@ -363,47 +476,16 @@ public:
 };
 
 
-
 class Receiver {
 public:
     XDPManager& xdp;
     OB& ob;
+    Sender& s;
     constexpr static u32 batchSize = 64;
 
-    Receiver(XDPManager& xdp, OB& ob): xdp{xdp}, ob{ob} {}
+    Receiver(XDPManager& xdp, OB& ob, Sender& s): xdp{xdp}, ob{ob}, s{s} {}
 
-    static void hex_dump(u8 *pkt, size_t length, u64 addr) {
-        const unsigned char *address = (unsigned char *)pkt;
-        const unsigned char *line = address;
-        size_t line_size = 32;
-        unsigned char c;
-        char buf[32];
-        int i = 0;
-
-        sprintf(buf, "addr=%lu", addr);
-        printf("length = %zu\n", length);
-        printf("%s | ", buf);
-        while (length-- > 0) {
-            printf("%02X ", *address++);
-            if (!(++i % line_size) || (length == 0 && i % line_size)) {
-                if (length == 0) {
-                    while (i++ % line_size)
-                        printf("__ ");
-                }
-                printf(" | ");	/* right close */
-                while (line < address) {
-                    c = *line++;
-                    printf("%c", (c < 33 || c == 255) ? 0x2E : c);
-                }
-                printf("\n");
-                if (length > 0)
-                    printf("%s | ", buf);
-            }
-        }
-        printf("\n");
-    }
-
-    Packet recv() {
+    void recv() {
         u32 idxRx = 0;
         u32 entries = 0;
         assert(!xsk_ring_prod__needs_wakeup(&xdp.umem.fillQ));
@@ -420,23 +502,22 @@ public:
             }
             ret = xsk_ring_prod__reserve(&xdp.umem.fillQ, entries, &idxFillQ);
         }
-	cout << "Received [" << entries << "]." << endl;
+	    cout << "Received [" << entries << "]." << endl;
         for(int i = 0; i < entries; ++i) {
             const struct xdp_desc *desc = xsk_ring_cons__rx_desc(&xdp.xsk.rx, idxRx++);
             u64 addrOffset = desc->addr;
             u32 len = desc->len;
             assert(addrOffset == xsk_umem__extract_addr(addrOffset));
-	    //            assert(!(desc->options & XDP_PKT_CONTD));
-	    u8* addr = static_cast<u8*>(xdp.umem.umemArea + addrOffset);
-            hex_dump(addr, len, addrOffset);
+
+    	    const PacketIn* packet = static_cast<PacketIn*>(xdp.umem.umemArea + addrOffset);
+            ob.update(desc, *packet);
             *xsk_ring_prod__fill_addr(&xdp.umem.fillQ, idxFillQ++) = addrOffset;
         }
 
         xsk_ring_prod__submit(&xdp.umem.fillQ, entries);
+        s.trigger();
         xsk_ring_cons__release(&xdp.xsk.rx, entries);
         xdp.xsk.ring_stats.rx_frags += entries;
-
-        return Packet{};
 
     }
 
@@ -454,8 +535,8 @@ int main(int argc, char **argv) {
     Receiver r(xdp, ob);
 
     while(true) {
-        Packet p = r.recv();
-        // ob.update(p);
+        r.recv();
+        s.complete();
     }
 
 }

@@ -10,6 +10,9 @@ https://www.mankier.com/3/libxdp
 
 https://github.com/xdp-project/bpf-examples
 
+https://www.google.com/search?q=xdp+for+sending+packets&oq=xdp+for+sending+packets&gs_lcrp=EgZjaHJvbWUyBggAEEUYOTIHCAEQIRigAdIBCDUxNjJqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8#fpstate=ive&ip=1&vld=cid:a162f2e7,vid:cxUd7CTb2XY,st:0
+https://lwn.net/Articles/901046/
+
 bpftool prog list
 bpftool prog dump xlated name hello
 bpftool prog show name hello
