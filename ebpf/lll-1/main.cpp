@@ -421,6 +421,7 @@ public:
         if(packetBuffered) {
             xsk_ring_prod__submit(tx, 1);
 
+            assert(((sock.socketCfg.bindFlags & XDP_CPY) != 0) == xsk_ring_prod__needs_wakeup(tx));
             if(xsk_ring_prod__needs_wakeup(tx)) {
                 // TODO - this is onyl needed in COPY mode, not needed for zero-copy mode, driven by the napi loop
                 assert(sock.xskFD > 2);
