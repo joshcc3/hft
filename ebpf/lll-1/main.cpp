@@ -426,8 +426,11 @@ public:
         umemLoc->od.price = price;
         umemLoc->od.side = side;
 
+        udp_hdr->check = 0;
+        udp_hdr->check = udp_csum(umemLoc->ip.saddr, umemLoc->ip.daddr, umemLoc->udp.len,
+                      IPPROTO_UDP, (u16 *)(&umemLoc->udp));
 	// Send an all 0 checksum to indicate no checksum was calculated
-        umemLoc->udp.check = 0;
+        // umemLoc->udp.check = 0;
         packetBuffered = true;
         ++seqNoOut;
 
