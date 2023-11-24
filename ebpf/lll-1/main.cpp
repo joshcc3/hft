@@ -54,6 +54,10 @@ using Price = int;
 using Qty = int;
 
 
+// TODO - this doesn't seem to be using drv_mode - need to verify this.
+// likely not using driver mode on the loopback interface - doesn't make sense.
+
+
 constexpr inline int PACKET_TYPE_MD = 1;
 constexpr inline int PACKET_TYPE_OE = 2;
 
@@ -71,7 +75,7 @@ struct PacketIn {
     u8 packetType;
     char _padding[5];
     struct market_data md;
-} __attribute__ ((packed)) ;
+} __attribute__ ((packed));
 
 struct order_data {
     int seqId;
@@ -85,9 +89,9 @@ struct PacketOut {
     struct iphdr ip;
     struct udphdr udp;
     u8 packetType;
-    char _padding[6];
+    char _padding[5];
     struct order_data od;
-} __attribute__ ((packed)) ;
+} __attribute__ ((packed));
 
 
 struct xsk_ring_stats {
@@ -143,8 +147,8 @@ static int lookup_bpf_map(int prog_fd)
   u32 i;
 
    u32 num_maps;
-  u32 prog_len = sizeof(struct bpf_prog_info);
-	u32 map_len = sizeof(struct bpf_map_info);
+   u32 prog_len = sizeof(struct bpf_prog_info);
+   u32 map_len = sizeof(struct bpf_map_info);
 
 	int fd, err, xsks_map_fd = -ENOENT;
 	struct bpf_map_info map_info{};
@@ -391,10 +395,11 @@ public:
         assert(umemLoc->ip.protocol == 17);
         assert(umemLoc->ip.tot_len == (htons(sizeof(PacketIn) - sizeof(ethhdr))));
 
-	    umemLoc->ip.tos = 7;
-	    umemLoc->ip.tot_len = htons(sizeof(PacketOut) - sizeof(ethhdr));
+	umemLoc->ip.frag_off = 0;
+	umemLoc->ip.tos = 0; // TODO - set to higher value
+	umemLoc->ip.tot_len = htons(sizeof(PacketOut) - sizeof(ethhdr));
 
-        umemLoc->ip.ttl = htons(255);
+        umemLoc->ip.ttl = 255;
         umemLoc->ip.check = 0;
         u32 csum = 0;
         u8* dataptr = reinterpret_cast<u8*>(&umemLoc->ip);
@@ -407,7 +412,7 @@ public:
         umemLoc->ip.check = ~u16(csum);
 
         constexpr int udpPacketSz = sizeof(PacketOut) - sizeof(ethhdr) - sizeof(iphdr);
-        umemLoc->udp.len = udpPacketSz;
+        umemLoc->udp.len = htons(udpPacketSz);
         umemLoc->udp.check = 0;
 	umemLoc->udp.dest = htons(4321);
 
@@ -425,6 +430,9 @@ public:
         umemLoc->udp.check = 0;
         packetBuffered = true;
         ++seqNoOut;
+
+	hex_dump((u8*)umemLoc, sizeof(PacketOut), readDesc->addr);
+
     }
 
     bool trigger() {
@@ -547,7 +555,6 @@ public:
 	    u8* packetData = static_cast<u8*>(xsk_umem__get_data(xdp.umem.umemArea, addrOffset));
 	        assert((u64(packetData) & 127) == 0);
     	    const PacketIn* packet = reinterpret_cast<PacketIn*>(packetData);
-	        hex_dump(packetData, sizeof(PacketIn), addrOffset);
 
 	        assert(packet->eth.h_proto == htons(ETH_P_IP));
 	        assert(packet->ip.version == 4);
