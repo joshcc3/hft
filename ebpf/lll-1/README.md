@@ -6,3 +6,4 @@ sudo bpftrace -e 'tracepoint:net:netif_receive_skb /str(args->name) == "lo"/ { p
 /sys/kernel/debug/tracing/events/net/netif_receive_skb_entry/format
 
 What is the needs_wakeup flag - i havent understood that.
+

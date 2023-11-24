@@ -399,17 +399,22 @@ public:
 	umemLoc->ip.tos = 0; // TODO - set to higher value
 	umemLoc->ip.tot_len = htons(sizeof(PacketOut) - sizeof(ethhdr));
 
-        umemLoc->ip.ttl = 255;
+        umemLoc->ip.ttl = u8(255);
         umemLoc->ip.check = 0;
-        u32 csum = 0;
+
         u8* dataptr = reinterpret_cast<u8*>(&umemLoc->ip);
+        u16 kernelcsum = ip_fast_csum(dataptr, umemLoc->ip.ihl);
+
+        u32 csum = 0;
         for(int i = 0; i < sizeof(iphdr)/sizeof(u8); i += 2) {
 	        u16 dat = (u16(dataptr[i]) << 8) | u16(dataptr[i + 1]);
             csum += dat;
         }
         csum = (csum & 0xffff) + (csum >> 16);
         csum = (csum & 0xffff) + (csum >> 16);
-        umemLoc->ip.check = ~u16(csum);
+        u16 mycsum = ~u16(csum);
+        assert(mycsum == kernelcsum);
+        umemLoc->ip.check = kernelcsum;
 
         constexpr int udpPacketSz = sizeof(PacketOut) - sizeof(ethhdr) - sizeof(iphdr);
         umemLoc->udp.len = htons(udpPacketSz);
