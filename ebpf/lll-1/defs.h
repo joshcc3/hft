@@ -2,8 +2,11 @@
 
 #include <cstdio>
 #include <cstdint>
+#include <cassert>
 
 using u8 = uint8_t;
+using u16 = uint16_t;
+using u32 = uint32_t;
 using u64 = uint64_t;
 
 static void hex_dump(u8 *pkt, size_t length, u64 addr) {
@@ -37,9 +40,6 @@ static void hex_dump(u8 *pkt, size_t length, u64 addr) {
     printf("\n");
 }
 
-u16 ip_fast_csum(const u8 *iph, u32 ihl) {
-	return (u16)~do_csum(iph, ihl*4);
-}
 
 
 static inline unsigned short from32to16(unsigned int x)
@@ -53,16 +53,21 @@ static inline unsigned short from32to16(unsigned int x)
 
 static unsigned int do_csum(const unsigned char *buff, int len)
 {
-	assert(buff != nullptr);
-	assert(len == 20);
-	assert(((unsigned long)buff & 11) == 0);
-	assert(((unsigned)len & ~3) == 0);
-
-	int odd;
 	unsigned int result = 0;
+
+	assert(len == 20);
+	assert(((unsigned long)buff & 0xf) == 0xe);
+
+	if (2 & (unsigned long) buff) {
+		result += *(unsigned short *) buff;
+		len -= 2;
+		buff += 2;
+	}
+	assert(len >= 4);
 
 	const unsigned char *end = buff + ((unsigned)len & ~3);
 	unsigned int carry = 0;
+
 	do {
 		unsigned int w = *(unsigned int *) buff;
 		buff += 4;
@@ -70,10 +75,21 @@ static unsigned int do_csum(const unsigned char *buff, int len)
 		result += w;
 		carry = (w > result);
 	} while (buff < end);
+
 	result += carry;
 	result = (result & 0xffff) + (result >> 16);
+
+	if (len & 2) {
+		result += *(unsigned short *) buff;
+		buff += 2;
+	}
 
 	result = from32to16(result);
 
 	return result;
+}
+
+
+u16 ip_fast_csum(const u8 *iph, u32 ihl) {
+	return (u16)~do_csum(iph, ihl*4);
 }

@@ -366,6 +366,7 @@ public:
     }
 
     void prepare(const xdp_desc* readDesc, char side, Price price, int seqNoIn) {
+
         assert(!packetBuffered);
         assert(readDesc->addr <= XSKUmem::FRAME_SIZE * (XSKUmem::NUM_FRAMES - 1));
         assert(readDesc->len > 0);
@@ -386,6 +387,8 @@ public:
         txDescr->options = 0;
 
         PacketOut* umemLoc = reinterpret_cast<PacketOut*>(umem.umemArea + readDesc->addr);
+	cout << "Read data " << endl;
+	hex_dump((u8*)umemLoc, sizeof(PacketOut), readDesc->addr);
         assert(umemLoc->eth.h_dest[0] == 0 && umemLoc->eth.h_dest[1] == 0 && umemLoc->eth.h_dest[2] == 0 && umemLoc->eth.h_dest[3] == 0);
         assert(umemLoc->eth.h_source[0] == 0 && umemLoc->eth.h_source[1] == 0 && umemLoc->eth.h_source[2] == 0 && umemLoc->eth.h_source[3] == 0);
         assert(umemLoc->eth.h_proto == htons(ETH_P_IP));
@@ -395,7 +398,7 @@ public:
         assert(umemLoc->ip.protocol == 17);
         assert(umemLoc->ip.tot_len == (htons(sizeof(PacketIn) - sizeof(ethhdr))));
 
-	umemLoc->ip.frag_off = 0;
+	//	umemLoc->ip.frag_off = 0;
 	umemLoc->ip.tos = 0; // TODO - set to higher value
 	umemLoc->ip.tot_len = htons(sizeof(PacketOut) - sizeof(ethhdr));
 
@@ -405,21 +408,13 @@ public:
         u8* dataptr = reinterpret_cast<u8*>(&umemLoc->ip);
         u16 kernelcsum = ip_fast_csum(dataptr, umemLoc->ip.ihl);
 
-        u32 csum = 0;
-        for(int i = 0; i < sizeof(iphdr)/sizeof(u8); i += 2) {
-	        u16 dat = (u16(dataptr[i]) << 8) | u16(dataptr[i + 1]);
-            csum += dat;
-        }
-        csum = (csum & 0xffff) + (csum >> 16);
-        csum = (csum & 0xffff) + (csum >> 16);
-        u16 mycsum = ~u16(csum);
-        assert(mycsum == kernelcsum);
         umemLoc->ip.check = kernelcsum;
 
         constexpr int udpPacketSz = sizeof(PacketOut) - sizeof(ethhdr) - sizeof(iphdr);
         umemLoc->udp.len = htons(udpPacketSz);
         umemLoc->udp.check = 0;
 	umemLoc->udp.dest = htons(4321);
+	umemLoc->udp.source = htons(1234);	
 
 	
 	umemLoc->packetType = PACKET_TYPE_OE;
@@ -438,6 +433,7 @@ public:
 
 	hex_dump((u8*)umemLoc, sizeof(PacketOut), readDesc->addr);
 
+	
     }
 
     bool trigger() {
