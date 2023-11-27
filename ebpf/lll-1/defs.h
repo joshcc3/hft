@@ -1,15 +1,19 @@
 #include <linux/if_ether.h>
 
+#include <linux/if_ether.h>
 #include <cstdio>
 #include <cstdint>
 #include <cassert>
+#include <algorithm>
+
+using namespace std;
 
 using u8 = uint8_t;
 using u16 = uint16_t;
 using u32 = uint32_t;
 using u64 = uint64_t;
 
-static void hex_dump(u8 *pkt, size_t length, u64 addr) {
+static void hex_dump(const u8 *pkt, size_t length, u64 addr) {
     const unsigned char *address = (unsigned char *)pkt;
     const unsigned char *line = address;
     size_t line_size = 32;
@@ -167,3 +171,17 @@ static inline u16 udp_csum(u32 saddr, u32 daddr, u32 len,
 
 	return csum_tcpudp_magic(saddr, daddr, len, proto, csum);
 }
+
+
+
+static void swap_mac_addresses(void *data)
+{
+	struct ethhdr *eth = (struct ethhdr *)data;
+	char *src_addr = (char *)&eth->h_source;
+	char *dst_addr = (char *)&eth->h_dest;
+	char tmp[ETH_ALEN];
+	copy(src_addr, src_addr + ETH_ALEN, tmp);
+	copy(dst_addr, dst_addr + ETH_ALEN, src_addr);
+	copy(tmp, tmp + ETH_ALEN, dst_addr);
+}
+

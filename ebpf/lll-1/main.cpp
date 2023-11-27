@@ -1,4 +1,6 @@
 #include "defs.h"
+#include <vector>
+#include <algorithm>
 #include <errno.h>
 #include <getopt.h>
 #include <libgen.h>
@@ -287,8 +289,6 @@ public:
     int xskFD = -1;
     const XDPConfig& socketCfg;
 
-    int if_index = if_nametoindex("lo");
-
     XSKSocket(XSKUmem& umem, XDPProgram& prog, const XDPConfig& socketCfg): umem{umem}, xdp_prog{prog}, socketCfg{socketCfg} {
 
         xsk_socket_config cfg {
@@ -299,7 +299,7 @@ public:
             .bind_flags = socketCfg.bindFlags
         };
 
-        int ret = xsk_socket__create(&xsk, "lo", QUEUE_NUM, umem.umem, &rx, &tx, &cfg);
+        int ret = xsk_socket__create(&xsk, "eth0", QUEUE_NUM, umem.umem, &rx, &tx, &cfg);
         if(ret != 0) {
             cerr << "Errno: " << -ret << endl;
             exit(EXIT_FAILURE);
@@ -326,7 +326,31 @@ public:
             cerr << "bpf_map_update_elem Errno: " << -ret << endl;
             exit(EXIT_FAILURE);
         }
-	    cout << "XSK init completed." << endl;
+
+
+	        assert(xskFD > 2);
+        int sock_opt = 1;
+        if (setsockopt(xskFD, SOL_SOCKET, SO_PREFER_BUSY_POLL,
+                   (void *)&sock_opt, sizeof(sock_opt)) < 0) {
+            perror("No busy poll");
+            exit(EXIT_FAILURE);
+        }
+
+        sock_opt = 100;
+        if (setsockopt(xskFD, SOL_SOCKET, SO_BUSY_POLL,
+                   (void *)&sock_opt, sizeof(sock_opt)) < 0) {
+            perror("No busy poll");
+            exit(EXIT_FAILURE);
+        }
+
+        sock_opt = 100;
+        if (setsockopt(xskFD, SOL_SOCKET, SO_BUSY_POLL_BUDGET,
+                   (void *)&sock_opt, sizeof(sock_opt)) < 0) {
+            perror("No busy poll");
+            exit(EXIT_FAILURE);
+        }
+
+	cout << "XSK init completed." << endl;
 
     }
 
@@ -360,9 +384,29 @@ public:
 
     bool packetBuffered;
 
+
+    int sockfd;
+    struct sockaddr_in servaddr;
+  const char* lastData = nullptr;
+  
+  
     Sender(XDPManager& xdp):
         sock{xdp.xsk}, umem{xdp.umem}, seqNoOut{}, packetBuffered{false},
         cq{&xdp.umem.completionQ}, tx{&xdp.xsk.tx}    {
+
+        // Create a socket
+        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sockfd < 0) {
+          std::cerr << "Socket creation failed" << std::endl;
+	  exit(EXIT_FAILURE);
+        }
+  
+        // Fill in server information
+        memset(&servaddr, 0, sizeof(servaddr));
+        servaddr.sin_family = AF_INET;
+        servaddr.sin_port = htons(4321);
+        servaddr.sin_addr.s_addr = inet_addr("172.31.24.228");
+      
     }
 
     void prepare(const xdp_desc* readDesc, char side, Price price, int seqNoIn) {
@@ -385,12 +429,11 @@ public:
         txDescr->addr = readDesc->addr;
         txDescr->len = sizeof(PacketOut);
         txDescr->options = 0;
-
         PacketOut* umemLoc = reinterpret_cast<PacketOut*>(umem.umemArea + readDesc->addr);
 	cout << "Read data " << endl;
 	hex_dump((u8*)umemLoc, sizeof(PacketOut), readDesc->addr);
-        assert(umemLoc->eth.h_dest[0] == 0 && umemLoc->eth.h_dest[1] == 0 && umemLoc->eth.h_dest[2] == 0 && umemLoc->eth.h_dest[3] == 0);
-        assert(umemLoc->eth.h_source[0] == 0 && umemLoc->eth.h_source[1] == 0 && umemLoc->eth.h_source[2] == 0 && umemLoc->eth.h_source[3] == 0);
+	//        assert(umemLoc->eth.h_dest[0] == 0 && umemLoc->eth.h_dest[1] == 0 && umemLoc->eth.h_dest[2] == 0 && umemLoc->eth.h_dest[3] == 0);
+	//        assert(umemLoc->eth.h_source[0] == 0 && umemLoc->eth.h_source[1] == 0 && umemLoc->eth.h_source[2] == 0 && umemLoc->eth.h_source[3] == 0);
         assert(umemLoc->eth.h_proto == htons(ETH_P_IP));
 
         //assert(umemLoc->ip.frag_off == 0);
@@ -426,22 +469,34 @@ public:
         umemLoc->od.price = price;
         umemLoc->od.side = side;
 
-        udp_hdr->check = 0;
-        udp_hdr->check = udp_csum(umemLoc->ip.saddr, umemLoc->ip.daddr, umemLoc->udp.len,
+        umemLoc->udp.check = 0;
+        umemLoc->udp.check = udp_csum(umemLoc->ip.saddr, umemLoc->ip.daddr, umemLoc->udp.len,
                       IPPROTO_UDP, (u16 *)(&umemLoc->udp));
 	// Send an all 0 checksum to indicate no checksum was calculated
         // umemLoc->udp.check = 0;
         packetBuffered = true;
         ++seqNoOut;
 
-	hex_dump((u8*)umemLoc, sizeof(PacketOut), readDesc->addr);
+	vector<u8> packetData = {0x45, 0x00, 0x00, 0x22, 0x89, 0x31, 0x40, 0x00, 0xff, 0x11, 0x6b, 0xe5, 0xac, 0x1f, 0x18, 0xe4, 0xa3, 0xea, 0x10, 0xe1, 0x00, 0x0e, 0x86, 0xd3, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x0a};
+	  /*{0x45, 0x00, 0x00, 0x2f, 0xc7, 0xa1, 0x40, 0x00, 0xff, 0x11, 0xb6, 0x19, 0x7f, 0x00, 0x00, 0x01,
+	  0x7f, 0x00, 0x00, 0x01, 0xa0, 0xed, 0x10, 0xe1, 0x00, 0x1b, 0xfe, 0x2e, 0x02, 0x00, 0x00, 0x00,
+	  0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x62, 0x00, 0x00, 0x00, 0x00};*/
 
-	
+	/*
+20:42:37.936162 IP 127.0.0.1.41197 > 127.0.0.1.rwhois: UDP, length 19
+        0x0000:  4500 002f c7a1 4000 ff11 b619 7f00 0001  E../..@.........
+        0x0010:  7f00 0001 a0ed 10e1 001b fe2e 0200 0000  ................
+        0x0020:  0000 0100 0000 0100 0000 6200 0000 00    ..........b....	 */
+	lastData = (char*)(&umemLoc->packetType);
+	//hex_dump((const u8*)lastData, sizeof(order_data) + 6, 0);
+
+	copy(packetData.begin(), packetData.end(), (u8*)(&umemLoc->ip));
+	hex_dump((const u8*)umemLoc, sizeof(PacketOut), 0);
     }
 
     bool trigger() {
         if(packetBuffered) {
-            xsk_ring_prod__submit(tx, 1);
+	  xsk_ring_prod__submit(tx, 1);
 
             assert(((sock.socketCfg.bindFlags & XDP_COPY) != 0) == xsk_ring_prod__needs_wakeup(tx));
             if(xsk_ring_prod__needs_wakeup(tx)) {
@@ -456,6 +511,15 @@ public:
                     exit(EXIT_FAILURE);
                 }
             }
+	  	  
+	  // Data to be sent
+	  assert(nullptr != lastData);
+  	  int len = sendto(sockfd, lastData, sizeof(order_data) + 6, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
+  	  if (len < 0) {
+  	    std::cerr << "Send failed" << std::endl;
+  	  }
+	  
+	  lastData = nullptr;
             packetBuffered = false;
             return true;
         } else {
@@ -469,6 +533,7 @@ public:
         assert(rcvd >= 0);
         assert(idx >= 0);
         if (rcvd > 0) {
+	  cout << "Successfully completed" << endl;
             xsk_ring_cons__release(cq, rcvd);
 	    // TODO - release to the fill queue over here as well
         }
@@ -593,7 +658,7 @@ int main(int argc, char **argv) {
     // TODO - verify that these flags actually work.
     XDPConfig cfg{
         .bindFlags = XDP_COPY & (~XDP_USE_NEED_WAKEUP),
-        .xdpMode = XDP_FLAGS_DRV_MODE,
+        .xdpMode = XDP_FLAGS_SKB_MODE, // XDP_FLAGS_DRV_MODE,
         .libxdpFlags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD,
     };
     XDPManager xdp{cfg};
