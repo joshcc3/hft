@@ -1,5 +1,6 @@
 #include "defs.h"
 #include <vector>
+#include <array>
 #include <algorithm>
 #include <cerrno>
 #include <libgen.h>
@@ -181,6 +182,7 @@ static int lookup_bpf_map(int prog_fd) {
 
 class XSKUmem {
 public:
+    static_assert(sizeof(PacketIn) == sizeof(PacketOut));
     constexpr static int FRAME_SIZE = XSK_UMEM__DEFAULT_FRAME_SIZE;
     constexpr static int NUM_FRAMES = 4096;
 
@@ -277,7 +279,7 @@ public:
             .bind_flags = socketCfg.bindFlags
         };
 
-        int ret = xsk_socket__create(&xsk, "lo1", QUEUE_NUM, umem.umem, &rx, &tx, &cfg);
+        int ret = xsk_socket__create(&xsk, "wlp0s20f3", QUEUE_NUM, umem.umem, &rx, &tx, &cfg);
         if (ret != 0) {
             cerr << "Errno: " << -ret << endl;
             exit(EXIT_FAILURE);
@@ -321,7 +323,7 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        sock_opt = 100;
+        sock_opt = 1000;
         if (setsockopt(xskFD, SOL_SOCKET, SO_BUSY_POLL_BUDGET,
                        (void *) &sock_opt, sizeof(sock_opt)) < 0) {
             perror("No busy poll");
@@ -368,17 +370,28 @@ public:
     explicit Sender(XDPManager& xdp): sock{xdp.xsk}, umem{xdp.umem}, seqNoOut{}, tx{&xdp.xsk.tx},
                                       cq{&xdp.umem.completionQ}, packetBuffered{false}, servaddr{} {
         // Create a socket
-        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-        if (sockfd < 0) {
-            std::cerr << "Socket creation failed" << std::endl;
-            exit(EXIT_FAILURE);
-        }
+        //sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        //if (sockfd < 0) {
+        //    std::cerr << "Socket creation failed" << std::endl;
+        //    exit(EXIT_FAILURE);
+        //}
 
-        // Fill in server information
-        memset(&servaddr, 0, sizeof(servaddr));
-        servaddr.sin_family = AF_INET;
-        servaddr.sin_port = htons(4321);
-        servaddr.sin_addr.s_addr = inet_addr("172.31.24.228");
+        //// Fill in server information
+        //memset(&servaddr, 0, sizeof(servaddr));
+        //servaddr.sin_family = AF_INET;
+        //servaddr.sin_port = htons(4321);
+        //servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    }
+
+
+    void prepareIndependentPacket() {
+        vector<u8> packetData = {
+            0x45, 0x00, 0x00, 0x2f, 0xa9, 0x37, 0x40, 0x00, 0x40, 0x11,
+            0x1c, 0x52, 0xc0, 0xa8, 0x00, 0x68,
+            0x0d, 0x28, 0xa6, 0xfc, 0xb0, 0x82, 0x10, 0xe1, 0x00, 0x1b, 0x75, 0x61, 0x02, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x62, 0x00, 0x00, 0x00, 0x00
+        };
+
     }
 
     void prepare(const xdp_desc* readDesc, char side, Price price, int seqNoIn) {
@@ -401,12 +414,15 @@ public:
         txDescr->len = sizeof(PacketOut);
         txDescr->options = 0;
         PacketOut* umemLoc = reinterpret_cast<PacketOut *>(umem.umemArea + readDesc->addr);
-        cout << "Read data " << endl;
-        hex_dump(reinterpret_cast<u8 *>(umemLoc), sizeof(PacketOut), readDesc->addr);
+
+        array<u8, ETH_ALEN> sourceMac = {0x3c, 0xe9, 0xf7, 0xfe, 0xdf, 0x6c};
+        array<u8, ETH_ALEN> destMac = {0x48, 0xd3, 0x43, 0xe9, 0x5c, 0xa0};
+        copy(sourceMac.begin(), sourceMac.end(), umemLoc->eth.h_source);
+        copy(destMac.begin(), destMac.end(), umemLoc->eth.h_dest);
+
         //        assert(umemLoc->eth.h_dest[0] == 0 && umemLoc->eth.h_dest[1] == 0 && umemLoc->eth.h_dest[2] == 0 && umemLoc->eth.h_dest[3] == 0);
         //        assert(umemLoc->eth.h_source[0] == 0 && umemLoc->eth.h_source[1] == 0 && umemLoc->eth.h_source[2] == 0 && umemLoc->eth.h_source[3] == 0);
         assert(umemLoc->eth.h_proto == htons(ETH_P_IP));
-
         //assert(umemLoc->ip.frag_off == 0);
         assert(umemLoc->ip.ttl != 0);
         assert(umemLoc->ip.protocol == 17);
@@ -415,9 +431,17 @@ public:
         //	umemLoc->ip.frag_off = 0;
         umemLoc->ip.tos = 0; // TODO - set to higher value
         umemLoc->ip.tot_len = htons(sizeof(PacketOut) - sizeof(ethhdr));
+        umemLoc->ip.id = htons(1);
 
         umemLoc->ip.ttl = static_cast<u8>(255);
         umemLoc->ip.check = 0;
+
+        constexpr u8 sourceIPBytes[4] = {192, 168, 0, 104};
+        constexpr u8 destIPBytes[4] = {13, 40, 166, 252};
+        const u32 sourceIP = *reinterpret_cast<const u32*>(sourceIPBytes);
+        const u32 destIP = *reinterpret_cast<const u32*>(destIPBytes);
+        umemLoc->ip.saddr = sourceIP;
+        umemLoc->ip.daddr = destIP;
 
         const u8* dataptr = reinterpret_cast<u8 *>(&umemLoc->ip);
         const u16 kernelcsum = ip_fast_csum(dataptr, umemLoc->ip.ihl);
@@ -433,8 +457,6 @@ public:
 
         umemLoc->packetType = PACKET_TYPE_OE;
 
-        // TODO - swap udp header source and destination as well.
-
         umemLoc->od.seqId = seqNoIn;
         umemLoc->od.seqIdOut = seqNoOut;
         umemLoc->od.price = price;
@@ -448,24 +470,20 @@ public:
         packetBuffered = true;
         ++seqNoOut;
 
-        vector<u8> packetData = {
-            0x45, 0x00, 0x00, 0x22, 0x89, 0x31, 0x40, 0x00, 0xff, 0x11, 0x6b, 0xe5, 0xac, 0x1f, 0x18, 0xe4, 0xa3, 0xea,
-            0x10, 0xe1, 0x00, 0x0e, 0x86, 0xd3, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x0a
-        };
-        /*{0x45, 0x00, 0x00, 0x2f, 0xc7, 0xa1, 0x40, 0x00, 0xff, 0x11, 0xb6, 0x19, 0x7f, 0x00, 0x00, 0x01,
-        0x7f, 0x00, 0x00, 0x01, 0xa0, 0xed, 0x10, 0xe1, 0x00, 0x1b, 0xfe, 0x2e, 0x02, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x62, 0x00, 0x00, 0x00, 0x00};*/
+        // vector<u8> packetData = {
+        //     0x45, 0x00, 0x00, 0x2f, 0xc6, 0x93, 0x40, 0x00, 0x40, 0x11, 0x76, 0x28, 0x7f, 0x00,
+        //     0x00, 0x01, 0x7f, 0x00, 0x00, 0x01, 0xb5, 0x57, 0x10, 0xe1, 0x00, 0x1b, 0xfe, 0x2e,
+        //     0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        //     0x62, 0x00, 0x00, 0x00, 0x00
+        // };
 
-        /*
-    20:42:37.936162 IP 127.0.0.1.41197 > 127.0.0.1.rwhois: UDP, length 19
-            0x0000:  4500 002f c7a1 4000 ff11 b619 7f00 0001  E../..@.........
-            0x0010:  7f00 0001 a0ed 10e1 001b fe2e 0200 0000  ................
-            0x0020:  0000 0100 0000 0100 0000 6200 0000 00    ..........b....	 */
-        lastData = reinterpret_cast<char *>(&umemLoc->packetType);
+
+        // lastData = reinterpret_cast<char *>(&umemLoc->packetType);
         //hex_dump((const u8*)lastData, sizeof(order_data) + 6, 0);
 
-        copy(packetData.begin(), packetData.end(), reinterpret_cast<u8 *>(&umemLoc->ip));
-        hex_dump(reinterpret_cast<const u8 *>(umemLoc), sizeof(PacketOut), 0);
+        // copy(packetData.begin(), packetData.end(), reinterpret_cast<u8 *>(&umemLoc->ip));
+
+        hex_dump(reinterpret_cast<const u8*>(umemLoc), sizeof(PacketOut), 0);
     }
 
     bool trigger() {
@@ -486,14 +504,13 @@ public:
                 }
             }
 
-            // Data to be sent
-            assert(nullptr != lastData);
-            const ssize_t len = sendto(sockfd, lastData, sizeof(order_data) + 6, 0, reinterpret_cast<const struct sockaddr *>(&servaddr),
-                                       sizeof(servaddr));
-            if (len < 0) {
-                std::cerr << "Send failed" << std::endl;
-            }
-
+           // Data to be sent
+//            assert(nullptr != lastData);
+//            const ssize_t len = sendto(sockfd, lastData, sizeof(order_data) + 6, 0, reinterpret_cast<const struct sockaddr *>(&servaddr),
+//                                       sizeof(servaddr));
+//            if (len <= 0) {
+//                std::cerr << "Send failed" << std::endl;
+ //           }
             lastData = nullptr;
             packetBuffered = false;
             return true;
@@ -591,6 +608,7 @@ public:
             u8* packetData = static_cast<u8 *>(xsk_umem__get_data(xdp.umem.umemArea, addrOffset));
             assert((reinterpret_cast<u64>(packetData) & 127) == 0);
             const PacketIn* packet = reinterpret_cast<PacketIn *>(packetData);
+            hex_dump(packetData, sizeof(PacketIn), desc->addr);
 
             assert(packet->eth.h_proto == htons(ETH_P_IP));
             assert(packet->ip.version == 4);

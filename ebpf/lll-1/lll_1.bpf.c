@@ -27,12 +27,21 @@ typedef __u16 u16;
 typedef __u32 u32;
 typedef __u64 u64;
 
+struct order_data {
+    int seqId;
+    int price;
+    char side;
+    int seqIdOut;
+} __attribute__ ((packed));
+
 struct Packet {
     struct ethhdr eth;
     struct iphdr ip;
     struct udphdr udp;
-    u8 appPacketType;
-} __attribute__ ((packed)) ;
+    u8 packetType;
+    char _padding[5];
+    struct order_data od;
+} __attribute__ ((packed));
 
 int num_socks = 1;
 int counter = 0;
@@ -41,7 +50,6 @@ int counter = 0;
 SEC("xdp")
 int lll_1(struct xdp_md *ctx)
 {
-  bpf_printk("Packet %d", counter++);
 
   if(ctx->data != ctx->data_meta) {
     bpf_printk("Unexpected metadata");
@@ -49,26 +57,33 @@ int lll_1(struct xdp_md *ctx)
   }
   void* data = (void*)(long)ctx->data;
   void* data_end = (void*)(long)ctx->data_end;
-  u64 sz = data_end - data;
-  if(data + sizeof(struct Packet) > data_end) { //
-    bpf_printk("Passing small packet");
+  if((data + sizeof(struct Packet)) > data_end) {
+    u64 sz = data_end - data;
+    bpf_printk("small packet: %d", sz);
+    return XDP_PASS;
+  } else if((data + sizeof(struct Packet)) < data_end) {
+    u64 sz = data_end - data;
+    bpf_printk("large packet: %d", sz);
     return XDP_PASS;
   } else {
 
     struct Packet* p = data;
     if(p->eth.h_proto != htons(ETH_P_IP) || p->ip.protocol != 17) {
       bpf_printk("Passing non-udp packet");
-      return XDP_PASS;    
-    }
-    
-    if(p->appPacketType != 1) {
-      bpf_printk("Passing non market data packet");
-      return XDP_PASS;    
+      return XDP_PASS;
     }
 
-    bpf_printk("Forwarding marketdata packet");    
-    return bpf_redirect_map(&xsks_map, 0, XDP_DROP);
+    bpf_printk("Packet: %d, type %d", counter++, p->packetType);
+    if(p->packetType == 2) {
+      bpf_printk("Order: price: %d", p->od.price);
+      return bpf_redirect_map(&xsks_map, 0, XDP_DROP);
+    }
+    if(p->packetType == 1) {
+      bpf_printk("Forwarding marketdata packet");
+      return bpf_redirect_map(&xsks_map, 0, XDP_DROP);
+    }
 
+    return XDP_PASS;
   }
 }
 

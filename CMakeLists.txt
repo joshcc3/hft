@@ -56,8 +56,8 @@ add_executable(obtester
 )
 
 add_executable(xdp_test
-        ebpf/lll-1/defs.h
         ebpf/lll-1/main.cpp
+        ebpf/lll-1/defs.h
 )
 
 target_link_libraries(networking uring)
