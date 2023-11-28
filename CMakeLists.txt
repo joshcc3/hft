@@ -4,6 +4,7 @@ project(obtester)
 project(tictactoe)
 project(lll_strategy)
 project(lll_exchange)
+project(xdp_test)
 set(CMAKE_CXX_STANDARD 17)
 
 find_package(Boost 1.78.0 COMPONENTS iostreams REQUIRED)
@@ -54,7 +55,13 @@ add_executable(obtester
         cubist/L3LevelAlloc.cpp
 )
 
+add_executable(xdp_test
+        ebpf/lll-1/defs.h
+        ebpf/lll-1/main.cpp
+)
+
 target_link_libraries(networking uring)
 target_link_libraries(cubist Boost::iostreams)
 target_link_libraries(lll_exchange Boost::iostreams uring)
 target_link_libraries(lll_strategy uring)
+target_link_libraries(xdp_test xdp bpf)

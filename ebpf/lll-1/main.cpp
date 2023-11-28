@@ -1,8 +1,7 @@
 #include "defs.h"
 #include <vector>
 #include <algorithm>
-#include <errno.h>
-#include <getopt.h>
+#include <cerrno>
 #include <libgen.h>
 #include <linux/bpf.h>
 #include <linux/err.h>
@@ -10,35 +9,22 @@
 #include <linux/if_xdp.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
-#include <linux/limits.h>
 #include <linux/udp.h>
 #include <arpa/inet.h>
-#include <locale.h>
 #include <net/ethernet.h>
-#include <netinet/ether.h>
-#include <net/if.h>
-#include <poll.h>
-#include <pthread.h>
-#include <signal.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <csignal>
+#include <cstdio>
+#include <cstring>
 #include <sys/mman.h>
-#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
-#include <time.h>
 #include <unistd.h>
-#include <sched.h>
 #include <iostream>
 #include <xdp/xsk.h>
-#include <bpf/xsk.h>
 
 #include <xdp/libxdp.h>
 #include <map>
-#include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 
 
@@ -144,112 +130,107 @@ struct XDPConfig {
 };
 
 
-static int lookup_bpf_map(int prog_fd)
-{
-  u32 i;
+static int lookup_bpf_map(int prog_fd) {
+    u32 prog_len = sizeof(struct bpf_prog_info);
+    u32 map_len = sizeof(struct bpf_map_info);
 
-   u32 num_maps;
-   u32 prog_len = sizeof(struct bpf_prog_info);
-   u32 map_len = sizeof(struct bpf_map_info);
+    int xsks_map_fd = -ENOENT;
+    struct bpf_map_info map_info{};
 
-	int fd, err, xsks_map_fd = -ENOENT;
-	struct bpf_map_info map_info{};
+    struct bpf_prog_info prog_info{};
+    int err = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_len);
+    if (err)
+        return err;
 
-	struct bpf_prog_info prog_info{};
-	err = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_len);
-	if (err)
-	  return err;
-
-	num_maps = prog_info.nr_map_ids;
-	u32 map_ids[num_maps];
+    const u32 num_maps = prog_info.nr_map_ids;
+    u32 map_ids[num_maps];
 
 
-	memset(&prog_info, 0, prog_len);
-	prog_info.nr_map_ids = num_maps;
-	prog_info.map_ids = (__u64)(unsigned long)map_ids;
+    memset(&prog_info, 0, prog_len);
+    prog_info.nr_map_ids = num_maps;
+    prog_info.map_ids = reinterpret_cast<u64>(map_ids);
 
-	err = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_len);
-	if (err) {
-		free(map_ids);
-		return err;
-	}
+    err = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_len);
+    if (err) {
+        return err;
+    }
 
-	for (i = 0; i < prog_info.nr_map_ids; i++) {
-		fd = bpf_map_get_fd_by_id(map_ids[i]);
-		if (fd < 0)
-			continue;
+    for (u32 i = 0; i < prog_info.nr_map_ids; i++) {
+        const int fd = bpf_map_get_fd_by_id(map_ids[i]);
+        if (fd < 0)
+            continue;
 
-		memset(&map_info, 0, map_len);
-		err = bpf_obj_get_info_by_fd(fd, &map_info, &map_len);
-		if (err) {
-			close(fd);
-			continue;
-		}
+        memset(&map_info, 0, map_len);
+        err = bpf_obj_get_info_by_fd(fd, &map_info, &map_len);
+        if (err) {
+            close(fd);
+            continue;
+        }
 
-		if (!strncmp(map_info.name, "xsks_map", sizeof(map_info.name)) &&
-		    map_info.key_size == 4 && map_info.value_size == 4) {
-			xsks_map_fd = fd;
-			break;
-		}
+        if (!strncmp(map_info.name, "xsks_map", sizeof(map_info.name)) &&
+            map_info.key_size == 4 && map_info.value_size == 4) {
+            xsks_map_fd = fd;
+            break;
+        }
 
-		close(fd);
-	}
+        close(fd);
+    }
 
-	return xsks_map_fd;
+    return xsks_map_fd;
 }
 
 class XSKUmem {
 public:
-
     constexpr static int FRAME_SIZE = XSK_UMEM__DEFAULT_FRAME_SIZE;
     constexpr static int NUM_FRAMES = 4096;
 
-    xsk_umem *umem{};
+    xsk_umem* umem{};
     u8* umemArea{};
     xsk_ring_prod fillQ{};
     xsk_ring_cons completionQ{};
 
     XSKUmem() {
-        u64 size = NUM_FRAMES * FRAME_SIZE;
-        umemArea = static_cast<u8*>(mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0));
-        if(umemArea == MAP_FAILED) {
+        constexpr u64 size = NUM_FRAMES * FRAME_SIZE;
+        umemArea = static_cast<u8 *>(mmap(nullptr, size, PROT_READ | PROT_WRITE,
+                                          MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0));
+        if (umemArea == MAP_FAILED) {
             perror("UMEM mmap: ");
             exit(EXIT_FAILURE);
         }
-	    printf("Buffer addr: %lx\n", u64(umemArea));
-	    assert((u64(umemArea) & (getpagesize() - 1)) == 0);
+        printf("Buffer addr: %lx\n", reinterpret_cast<u64>(umemArea));
+        assert((reinterpret_cast<u64>(umemArea) & (getpagesize() - 1)) == 0);
 
-	    /*
+        /*
             xsk_umem_config cfg = {
                 .fill_size = XSK_RING_PROD__DEFAULT_NUM_DESCS * 2,
                 .comp_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
                 .frame_size = FRAME_SIZE,
                 .frame_headroom = XSK_UMEM__DEFAULT_FRAME_HEADROOM,
                 .flags = XSK_UMEM__DEFAULT_FLAGS
-	        };
-	        This config doesn't seem to work properly.
-	    */
-        int res = xsk_umem__create(&umem,
-                             umemArea, size,
-                             &fillQ,
-                             &completionQ,
-			                 NULL);
-        if(res != 0) {
-	        perror("Umem create: " );
+            };
+            This config doesn't seem to work properly.
+        */
+        const int res = xsk_umem__create(&umem,
+                                         umemArea, size,
+                                         &fillQ,
+                                         &completionQ,
+                                         nullptr);
+        if (res != 0) {
+            perror("Umem create: ");
             cerr << "Errno: " << -res << endl;
             exit(EXIT_FAILURE);
         }
         u32 idx = 0;
-        res = xsk_ring_prod__reserve(&fillQ, XSK_RING_PROD__DEFAULT_NUM_DESCS, &idx);
-        if(res != XSK_RING_PROD__DEFAULT_NUM_DESCS) {
-            cerr << "Fill ring reserve: " << -res << endl;
+        const u32 prodReserveRes = xsk_ring_prod__reserve(&fillQ, XSK_RING_PROD__DEFAULT_NUM_DESCS, &idx);
+        if (prodReserveRes != XSK_RING_PROD__DEFAULT_NUM_DESCS) {
+            cerr << "Fill ring reserve: " << -prodReserveRes << endl;
             exit(EXIT_FAILURE);
         }
         assert(idx == 0);
 
         for (int i = 0; i < XSK_RING_PROD__DEFAULT_NUM_DESCS; i++) {
             *xsk_ring_prod__fill_addr(&fillQ, idx++) =
-                i * FRAME_SIZE;
+                    i * FRAME_SIZE;
         }
         xsk_ring_prod__submit(&fillQ, XSK_RING_PROD__DEFAULT_NUM_DESCS);
 
@@ -263,13 +244,10 @@ public:
 
     XDPProgram() {
         program = xdp_program__from_pin("/sys/fs/bpf/lll_1");
-	if(NULL == program) {
-	  cerr << "Failed to get program" << endl;
-	  exit(EXIT_FAILURE);
-	}
-    }
-
-    ~XDPProgram() {
+        if (nullptr == program) {
+            cerr << "Failed to get program" << endl;
+            exit(EXIT_FAILURE);
+        }
     }
 };
 
@@ -279,7 +257,7 @@ public:
     XDPProgram& xdp_prog;
 
     XSKUmem& umem;
-    xsk_socket *xsk{};
+    xsk_socket* xsk{};
     xsk_ring_cons rx{};
     xsk_ring_prod tx{};
     xsk_ring_stats ring_stats{};
@@ -289,9 +267,9 @@ public:
     int xskFD = -1;
     const XDPConfig& socketCfg;
 
-    XSKSocket(XSKUmem& umem, XDPProgram& prog, const XDPConfig& socketCfg): umem{umem}, xdp_prog{prog}, socketCfg{socketCfg} {
-
-        xsk_socket_config cfg {
+    XSKSocket(XSKUmem& umem, XDPProgram& prog, const XDPConfig& socketCfg): xdp_prog{prog}, umem{umem},
+                                                                            socketCfg{socketCfg} {
+        xsk_socket_config cfg{
             .rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
             .tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS,
             .libxdp_flags = socketCfg.libxdpFlags,
@@ -299,8 +277,8 @@ public:
             .bind_flags = socketCfg.bindFlags
         };
 
-        int ret = xsk_socket__create(&xsk, "eth0", QUEUE_NUM, umem.umem, &rx, &tx, &cfg);
-        if(ret != 0) {
+        int ret = xsk_socket__create(&xsk, "lo1", QUEUE_NUM, umem.umem, &rx, &tx, &cfg);
+        if (ret != 0) {
             cerr << "Errno: " << -ret << endl;
             exit(EXIT_FAILURE);
         }
@@ -308,14 +286,14 @@ public:
         xskFD = xsk_socket__fd(xsk);
         assert(xskFD > 2 && xskFD < 20);
 
-	    assert(!IS_ERR_OR_NULL(xdp_prog.program));
-	    cout << "XSK Socket FD " << xskFD << endl;
+        assert(!IS_ERR_OR_NULL(xdp_prog.program));
+        cout << "XSK Socket FD " << xskFD << endl;
 
-	    int programFD = xdp_program__fd(xdp_prog.program);
+        int programFD = xdp_program__fd(xdp_prog.program);
         int xsks_map = lookup_bpf_map(programFD);
         if (xsks_map < 0) {
             fprintf(stderr, "ERROR: no xsks map found: %s\n",
-            strerror(xsks_map));
+                    strerror(xsks_map));
             exit(EXIT_FAILURE);
         }
 
@@ -328,48 +306,45 @@ public:
         }
 
 
-	        assert(xskFD > 2);
+        assert(xskFD > 2);
         int sock_opt = 1;
         if (setsockopt(xskFD, SOL_SOCKET, SO_PREFER_BUSY_POLL,
-                   (void *)&sock_opt, sizeof(sock_opt)) < 0) {
+                       (void *) &sock_opt, sizeof(sock_opt)) < 0) {
             perror("No busy poll");
             exit(EXIT_FAILURE);
         }
 
         sock_opt = 100;
         if (setsockopt(xskFD, SOL_SOCKET, SO_BUSY_POLL,
-                   (void *)&sock_opt, sizeof(sock_opt)) < 0) {
+                       (void *) &sock_opt, sizeof(sock_opt)) < 0) {
             perror("No busy poll");
             exit(EXIT_FAILURE);
         }
 
         sock_opt = 100;
         if (setsockopt(xskFD, SOL_SOCKET, SO_BUSY_POLL_BUDGET,
-                   (void *)&sock_opt, sizeof(sock_opt)) < 0) {
+                       (void *) &sock_opt, sizeof(sock_opt)) < 0) {
             perror("No busy poll");
             exit(EXIT_FAILURE);
         }
 
-	cout << "XSK init completed." << endl;
-
+        cout << "XSK init completed." << endl;
     }
-
 };
 
 
 class XDPManager {
 public:
-  XDPProgram program{};
-  XSKUmem umem{};
-  XSKSocket xsk;
+    XDPProgram program{};
+    XSKUmem umem{};
+    XSKSocket xsk;
 
-  XDPManager(const XDPConfig& cfg): xsk{umem, program, cfg} {
+    explicit XDPManager(const XDPConfig& cfg): xsk{umem, program, cfg} {
+    }
 
-  }
-
-  ~XDPManager() {
-            exit(EXIT_FAILURE);
-  }
+    ~XDPManager() {
+        exit(EXIT_FAILURE);
+    }
 };
 
 class Sender {
@@ -386,31 +361,27 @@ public:
 
 
     int sockfd;
-    struct sockaddr_in servaddr;
-  const char* lastData = nullptr;
-  
-  
-    Sender(XDPManager& xdp):
-        sock{xdp.xsk}, umem{xdp.umem}, seqNoOut{}, packetBuffered{false},
-        cq{&xdp.umem.completionQ}, tx{&xdp.xsk.tx}    {
+    sockaddr_in servaddr;
+    const char* lastData = nullptr;
 
+
+    explicit Sender(XDPManager& xdp): sock{xdp.xsk}, umem{xdp.umem}, seqNoOut{}, tx{&xdp.xsk.tx},
+                                      cq{&xdp.umem.completionQ}, packetBuffered{false}, servaddr{} {
         // Create a socket
         sockfd = socket(AF_INET, SOCK_DGRAM, 0);
         if (sockfd < 0) {
-          std::cerr << "Socket creation failed" << std::endl;
-	  exit(EXIT_FAILURE);
+            std::cerr << "Socket creation failed" << std::endl;
+            exit(EXIT_FAILURE);
         }
-  
+
         // Fill in server information
         memset(&servaddr, 0, sizeof(servaddr));
         servaddr.sin_family = AF_INET;
         servaddr.sin_port = htons(4321);
         servaddr.sin_addr.s_addr = inet_addr("172.31.24.228");
-      
     }
 
     void prepare(const xdp_desc* readDesc, char side, Price price, int seqNoIn) {
-
         assert(!packetBuffered);
         assert(readDesc->addr <= XSKUmem::FRAME_SIZE * (XSKUmem::NUM_FRAMES - 1));
         assert(readDesc->len > 0);
@@ -420,20 +391,20 @@ public:
 
         u32 txIdx = -1;
         assert(tx != nullptr);
-        int txSlotsRecvd = xsk_ring_prod__reserve(tx, 1, &txIdx);
-        assert(txIdx >= 0 && txIdx < XSK_RING_PROD__DEFAULT_NUM_DESCS);
+        const u32 txSlotsRecvd = xsk_ring_prod__reserve(tx, 1, &txIdx);
+        assert(txIdx < XSK_RING_PROD__DEFAULT_NUM_DESCS);
         assert(txSlotsRecvd == 1);
 
-        struct xdp_desc *txDescr = xsk_ring_prod__tx_desc(tx, txIdx);
+        struct xdp_desc* txDescr = xsk_ring_prod__tx_desc(tx, txIdx);
         assert(nullptr != txDescr);
         txDescr->addr = readDesc->addr;
         txDescr->len = sizeof(PacketOut);
         txDescr->options = 0;
-        PacketOut* umemLoc = reinterpret_cast<PacketOut*>(umem.umemArea + readDesc->addr);
-	cout << "Read data " << endl;
-	hex_dump((u8*)umemLoc, sizeof(PacketOut), readDesc->addr);
-	//        assert(umemLoc->eth.h_dest[0] == 0 && umemLoc->eth.h_dest[1] == 0 && umemLoc->eth.h_dest[2] == 0 && umemLoc->eth.h_dest[3] == 0);
-	//        assert(umemLoc->eth.h_source[0] == 0 && umemLoc->eth.h_source[1] == 0 && umemLoc->eth.h_source[2] == 0 && umemLoc->eth.h_source[3] == 0);
+        PacketOut* umemLoc = reinterpret_cast<PacketOut *>(umem.umemArea + readDesc->addr);
+        cout << "Read data " << endl;
+        hex_dump(reinterpret_cast<u8 *>(umemLoc), sizeof(PacketOut), readDesc->addr);
+        //        assert(umemLoc->eth.h_dest[0] == 0 && umemLoc->eth.h_dest[1] == 0 && umemLoc->eth.h_dest[2] == 0 && umemLoc->eth.h_dest[3] == 0);
+        //        assert(umemLoc->eth.h_source[0] == 0 && umemLoc->eth.h_source[1] == 0 && umemLoc->eth.h_source[2] == 0 && umemLoc->eth.h_source[3] == 0);
         assert(umemLoc->eth.h_proto == htons(ETH_P_IP));
 
         //assert(umemLoc->ip.frag_off == 0);
@@ -441,26 +412,26 @@ public:
         assert(umemLoc->ip.protocol == 17);
         assert(umemLoc->ip.tot_len == (htons(sizeof(PacketIn) - sizeof(ethhdr))));
 
-	//	umemLoc->ip.frag_off = 0;
-	umemLoc->ip.tos = 0; // TODO - set to higher value
-	umemLoc->ip.tot_len = htons(sizeof(PacketOut) - sizeof(ethhdr));
+        //	umemLoc->ip.frag_off = 0;
+        umemLoc->ip.tos = 0; // TODO - set to higher value
+        umemLoc->ip.tot_len = htons(sizeof(PacketOut) - sizeof(ethhdr));
 
-        umemLoc->ip.ttl = u8(255);
+        umemLoc->ip.ttl = static_cast<u8>(255);
         umemLoc->ip.check = 0;
 
-        u8* dataptr = reinterpret_cast<u8*>(&umemLoc->ip);
-        u16 kernelcsum = ip_fast_csum(dataptr, umemLoc->ip.ihl);
+        const u8* dataptr = reinterpret_cast<u8 *>(&umemLoc->ip);
+        const u16 kernelcsum = ip_fast_csum(dataptr, umemLoc->ip.ihl);
 
         umemLoc->ip.check = kernelcsum;
 
         constexpr int udpPacketSz = sizeof(PacketOut) - sizeof(ethhdr) - sizeof(iphdr);
         umemLoc->udp.len = htons(udpPacketSz);
         umemLoc->udp.check = 0;
-	umemLoc->udp.dest = htons(4321);
-	umemLoc->udp.source = htons(1234);	
+        umemLoc->udp.dest = htons(4321);
+        umemLoc->udp.source = htons(1234);
 
-	
-	umemLoc->packetType = PACKET_TYPE_OE;
+
+        umemLoc->packetType = PACKET_TYPE_OE;
 
         // TODO - swap udp header source and destination as well.
 
@@ -471,55 +442,59 @@ public:
 
         umemLoc->udp.check = 0;
         umemLoc->udp.check = udp_csum(umemLoc->ip.saddr, umemLoc->ip.daddr, umemLoc->udp.len,
-                      IPPROTO_UDP, (u16 *)(&umemLoc->udp));
-	// Send an all 0 checksum to indicate no checksum was calculated
+                                      IPPROTO_UDP, reinterpret_cast<u16 *>(&umemLoc->udp));
+        // Send an all 0 checksum to indicate no checksum was calculated
         // umemLoc->udp.check = 0;
         packetBuffered = true;
         ++seqNoOut;
 
-	vector<u8> packetData = {0x45, 0x00, 0x00, 0x22, 0x89, 0x31, 0x40, 0x00, 0xff, 0x11, 0x6b, 0xe5, 0xac, 0x1f, 0x18, 0xe4, 0xa3, 0xea, 0x10, 0xe1, 0x00, 0x0e, 0x86, 0xd3, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x0a};
-	  /*{0x45, 0x00, 0x00, 0x2f, 0xc7, 0xa1, 0x40, 0x00, 0xff, 0x11, 0xb6, 0x19, 0x7f, 0x00, 0x00, 0x01,
-	  0x7f, 0x00, 0x00, 0x01, 0xa0, 0xed, 0x10, 0xe1, 0x00, 0x1b, 0xfe, 0x2e, 0x02, 0x00, 0x00, 0x00,
-	  0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x62, 0x00, 0x00, 0x00, 0x00};*/
+        vector<u8> packetData = {
+            0x45, 0x00, 0x00, 0x22, 0x89, 0x31, 0x40, 0x00, 0xff, 0x11, 0x6b, 0xe5, 0xac, 0x1f, 0x18, 0xe4, 0xa3, 0xea,
+            0x10, 0xe1, 0x00, 0x0e, 0x86, 0xd3, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x0a
+        };
+        /*{0x45, 0x00, 0x00, 0x2f, 0xc7, 0xa1, 0x40, 0x00, 0xff, 0x11, 0xb6, 0x19, 0x7f, 0x00, 0x00, 0x01,
+        0x7f, 0x00, 0x00, 0x01, 0xa0, 0xed, 0x10, 0xe1, 0x00, 0x1b, 0xfe, 0x2e, 0x02, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x62, 0x00, 0x00, 0x00, 0x00};*/
 
-	/*
-20:42:37.936162 IP 127.0.0.1.41197 > 127.0.0.1.rwhois: UDP, length 19
-        0x0000:  4500 002f c7a1 4000 ff11 b619 7f00 0001  E../..@.........
-        0x0010:  7f00 0001 a0ed 10e1 001b fe2e 0200 0000  ................
-        0x0020:  0000 0100 0000 0100 0000 6200 0000 00    ..........b....	 */
-	lastData = (char*)(&umemLoc->packetType);
-	//hex_dump((const u8*)lastData, sizeof(order_data) + 6, 0);
+        /*
+    20:42:37.936162 IP 127.0.0.1.41197 > 127.0.0.1.rwhois: UDP, length 19
+            0x0000:  4500 002f c7a1 4000 ff11 b619 7f00 0001  E../..@.........
+            0x0010:  7f00 0001 a0ed 10e1 001b fe2e 0200 0000  ................
+            0x0020:  0000 0100 0000 0100 0000 6200 0000 00    ..........b....	 */
+        lastData = reinterpret_cast<char *>(&umemLoc->packetType);
+        //hex_dump((const u8*)lastData, sizeof(order_data) + 6, 0);
 
-	copy(packetData.begin(), packetData.end(), (u8*)(&umemLoc->ip));
-	hex_dump((const u8*)umemLoc, sizeof(PacketOut), 0);
+        copy(packetData.begin(), packetData.end(), reinterpret_cast<u8 *>(&umemLoc->ip));
+        hex_dump(reinterpret_cast<const u8 *>(umemLoc), sizeof(PacketOut), 0);
     }
 
     bool trigger() {
-        if(packetBuffered) {
-	  xsk_ring_prod__submit(tx, 1);
+        if (packetBuffered) {
+            xsk_ring_prod__submit(tx, 1);
 
             assert(((sock.socketCfg.bindFlags & XDP_COPY) != 0) == xsk_ring_prod__needs_wakeup(tx));
-            if(xsk_ring_prod__needs_wakeup(tx)) {
+            if (xsk_ring_prod__needs_wakeup(tx)) {
                 // TODO - this is onyl needed in COPY mode, not needed for zero-copy mode, driven by the napi loop
                 assert(sock.xskFD > 2);
                 assert((sock.socketCfg.bindFlags & XDP_COPY) != 0);
-                int ret = sendto(sock.xskFD, NULL, 0, MSG_DONTWAIT, NULL, 0);
+                const ssize_t ret = sendto(sock.xskFD, nullptr, 0, MSG_DONTWAIT, nullptr, 0);
 
                 if (!(ret >= 0 || errno == ENOBUFS || errno == EAGAIN ||
-                    errno == EBUSY || errno == ENETDOWN)) {
+                      errno == EBUSY || errno == ENETDOWN)) {
                     perror("Kick did not work");
                     exit(EXIT_FAILURE);
                 }
             }
-	  	  
-	  // Data to be sent
-	  assert(nullptr != lastData);
-  	  int len = sendto(sockfd, lastData, sizeof(order_data) + 6, 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
-  	  if (len < 0) {
-  	    std::cerr << "Send failed" << std::endl;
-  	  }
-	  
-	  lastData = nullptr;
+
+            // Data to be sent
+            assert(nullptr != lastData);
+            const ssize_t len = sendto(sockfd, lastData, sizeof(order_data) + 6, 0, reinterpret_cast<const struct sockaddr *>(&servaddr),
+                                       sizeof(servaddr));
+            if (len < 0) {
+                std::cerr << "Send failed" << std::endl;
+            }
+
+            lastData = nullptr;
             packetBuffered = false;
             return true;
         } else {
@@ -527,25 +502,21 @@ public:
         }
     }
 
-    void complete() {
+    void complete() const {
         u32 idx = -1;
-        int rcvd = xsk_ring_cons__peek(cq, 1, &idx);
-        assert(rcvd >= 0);
-        assert(idx >= 0);
+        const u32 rcvd = xsk_ring_cons__peek(cq, 1, &idx);
         if (rcvd > 0) {
-	  cout << "Successfully completed" << endl;
+            cout << "Successfully completed" << endl;
             xsk_ring_cons__release(cq, rcvd);
-	    // TODO - release to the fill queue over here as well
+            // TODO - release to the fill queue over here as well
         }
     }
 
-    void stateCheck() {
+    void stateCheck() const {
         assert(tx != nullptr);
         assert(cq != nullptr);
     }
-
 };
-
 
 
 class OB {
@@ -553,28 +524,27 @@ public:
     map<Price, Qty> bids;
     map<Price, Qty> asks;
     Sender& s;
-    OB(Sender& s): s{s}, bids{}, asks{} {
 
-    }
+    explicit OB(Sender& s): s{s} {}
 
-    void update(const struct xdp_desc* readDesc, const PacketIn& packet) {
+    void update(const xdp_desc* readDesc, const PacketIn& packet) {
         market_data p = packet.md;
-        if(p.side == 'b') {
-            if(p.qty == 0) {
-               bids.erase(p.price);
+        if (p.side == 'b') {
+            if (p.qty == 0) {
+                bids.erase(p.price);
             } else {
-                if(p.price >= bids.begin()->first && p.qty > 1000) {
-		  s.prepare(readDesc, p.side, p.price, p.seqId);
+                if (p.price >= bids.begin()->first && p.qty > 1000) {
+                    s.prepare(readDesc, p.side, p.price, p.seqId);
                 }
                 const auto& [iter, added] = bids.emplace(p.price, p.qty);
                 iter->second = p.qty;
             }
-        } else if(p.side == 'a') {
-            if(p.qty == 0) {
+        } else if (p.side == 'a') {
+            if (p.qty == 0) {
                 asks.erase(p.price);
             } else {
-                if(p.price <= asks.begin()->first && p.qty > 1000) {
-		  s.prepare(readDesc, p.side, p.price, p.seqId);
+                if (p.price <= asks.begin()->first && p.qty > 1000) {
+                    s.prepare(readDesc, p.side, p.price, p.seqId);
                 }
                 const auto& [iter, added] = asks.emplace(p.price, p.qty);
                 iter->second = p.qty;
@@ -583,7 +553,6 @@ public:
             assert(false);
         }
     }
-
 };
 
 
@@ -594,67 +563,60 @@ public:
     Sender& s;
     constexpr static u32 batchSize = 64;
 
-    Receiver(XDPManager& xdp, OB& ob, Sender& s): xdp{xdp}, ob{ob}, s{s} {}
+    Receiver(XDPManager& xdp, OB& ob, Sender& s): xdp{xdp}, ob{ob}, s{s} {
+    }
 
-    void recv() {
+    void recv() const {
         u32 idxRx = 0;
-        u32 entries = 0;
+        u32 entries;
         assert(!xsk_ring_prod__needs_wakeup(&xdp.umem.fillQ));
-        while((entries = xsk_ring_cons__peek(&xdp.xsk.rx, batchSize, &idxRx)) == 0);
+        while ((entries = xsk_ring_cons__peek(&xdp.xsk.rx, batchSize, &idxRx)) == 0){}
         assert(entries > 0);
-        assert(idxRx >= 0 && idxRx < XSK_RING_CONS__DEFAULT_NUM_DESCS);
+        assert(idxRx < XSK_RING_CONS__DEFAULT_NUM_DESCS);
 
         u32 idxFillQ = 0;
-        int ret = xsk_ring_prod__reserve(&xdp.umem.fillQ, entries, &idxFillQ);
-        while(ret != entries) {
-            if(ret < 0) {
-                cerr << "Could not reserve entries: " << -ret << endl;
-                exit(EXIT_FAILURE);
-            }
+        u32 ret = xsk_ring_prod__reserve(&xdp.umem.fillQ, entries, &idxFillQ);
+        while (ret != entries) {
             ret = xsk_ring_prod__reserve(&xdp.umem.fillQ, entries, &idxFillQ);
         }
-	    cout << "Received [" << entries << "]." << endl;
-        for(int i = 0; i < entries; ++i) {
-            const struct xdp_desc *desc = xsk_ring_cons__rx_desc(&xdp.xsk.rx, idxRx++);
-            u64 addrOffset = desc->addr;
-            u32 len = desc->len;
+        cout << "Received [" << entries << "]." << endl;
+        for (int i = 0; i < entries; ++i) {
+            const xdp_desc* desc = xsk_ring_cons__rx_desc(&xdp.xsk.rx, idxRx++);
+            const u64 addrOffset = desc->addr;
+            const u32 len = desc->len;
             assert(addrOffset == xsk_umem__extract_addr(addrOffset));
+            assert(len == sizeof(PacketIn));
 
             assert(xdp.umem.umemArea + addrOffset == xsk_umem__get_data(xdp.umem.umemArea, addrOffset));
-	    u8* packetData = static_cast<u8*>(xsk_umem__get_data(xdp.umem.umemArea, addrOffset));
-	        assert((u64(packetData) & 127) == 0);
-    	    const PacketIn* packet = reinterpret_cast<PacketIn*>(packetData);
+            u8* packetData = static_cast<u8 *>(xsk_umem__get_data(xdp.umem.umemArea, addrOffset));
+            assert((reinterpret_cast<u64>(packetData) & 127) == 0);
+            const PacketIn* packet = reinterpret_cast<PacketIn *>(packetData);
 
-	        assert(packet->eth.h_proto == htons(ETH_P_IP));
-	        assert(packet->ip.version == 4);
-	        assert(packet->ip.ihl == 5);
-	        assert(htons(packet->ip.tot_len) == sizeof(PacketIn) - sizeof(ethhdr));
-	        //assert((packet->ip.frag_off & 0x1fff) == 0);
-	        assert(((packet->ip.frag_off >> 13) & 1) == 0);
-	        assert(((packet->ip.frag_off >> 15) & 1) == 0);
-	        assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
-		assert(packet->packetType == PACKET_TYPE_MD);
+            assert(packet->eth.h_proto == htons(ETH_P_IP));
+            assert(packet->ip.version == 4);
+            assert(packet->ip.ihl == 5);
+            assert(htons(packet->ip.tot_len) == sizeof(PacketIn) - sizeof(ethhdr));
+            //assert((packet->ip.frag_off & 0x1fff) == 0);
+            assert(((packet->ip.frag_off >> 13) & 1) == 0);
+            assert(((packet->ip.frag_off >> 15) & 1) == 0);
+            assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
+            assert(packet->packetType == PACKET_TYPE_MD);
             ob.update(desc, *packet);
-            if(!s.packetBuffered) {
+            if (!s.packetBuffered) {
                 *xsk_ring_prod__fill_addr(&xdp.umem.fillQ, idxFillQ++) = addrOffset;
             }
         }
-        if(!s.trigger()) {
+        if (!s.trigger()) {
             // TODO - update the fill q on a sender complete to indicate can be used for receiving
             xsk_ring_prod__submit(&xdp.umem.fillQ, entries);
         }
         xsk_ring_cons__release(&xdp.xsk.rx, entries);
         xdp.xsk.ring_stats.rx_frags += entries;
-
     }
-
-
 };
 
 
-
-int main(int argc, char **argv) {
-
+[[noreturn]] int main(int argc, char** argv) {
     // TODO - verify that these flags actually work.
     XDPConfig cfg{
         .bindFlags = XDP_COPY & (~XDP_USE_NEED_WAKEUP),
@@ -667,9 +629,8 @@ int main(int argc, char **argv) {
     OB ob(s);
     Receiver r(xdp, ob, s);
 
-    while(true) {
+    while (true) {
         r.recv();
         s.complete();
     }
-
 }

@@ -38,7 +38,7 @@ int num_socks = 1;
 int counter = 0;
 
 
-SEC("xdp_sock")
+SEC("xdp")
 int lll_1(struct xdp_md *ctx)
 {
   bpf_printk("Packet %d", counter++);
