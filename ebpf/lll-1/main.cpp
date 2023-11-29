@@ -245,11 +245,11 @@ public:
     xdp_program* program;
 
     XDPProgram() {
-        program = xdp_program__from_pin("/sys/fs/bpf/lll_1");
-        if (nullptr == program) {
-            cerr << "Failed to get program" << endl;
-            exit(EXIT_FAILURE);
-        }
+        // program = xdp_program__from_pin("/sys/fs/bpf/lll_1");
+        // if (nullptr == program) {
+            // cerr << "Failed to get program" << endl;
+            // exit(EXIT_FAILURE);
+        // }
     }
 };
 
@@ -279,7 +279,7 @@ public:
             .bind_flags = socketCfg.bindFlags
         };
 
-        int ret = xsk_socket__create(&xsk, "wlp0s20f3", QUEUE_NUM, umem.umem, &rx, &tx, &cfg);
+        int ret = xsk_socket__create(&xsk, "wlp0s20f3", QUEUE_NUM, umem.umem, nullptr, &tx, &cfg);
         if (ret != 0) {
             cerr << "Errno: " << -ret << endl;
             exit(EXIT_FAILURE);
@@ -288,34 +288,31 @@ public:
         xskFD = xsk_socket__fd(xsk);
         assert(xskFD > 2 && xskFD < 20);
 
-        assert(!IS_ERR_OR_NULL(xdp_prog.program));
+        // assert(!IS_ERR_OR_NULL(xdp_prog.program));
         cout << "XSK Socket FD " << xskFD << endl;
 
-        int programFD = xdp_program__fd(xdp_prog.program);
-        int xsks_map = lookup_bpf_map(programFD);
-        if (xsks_map < 0) {
-            fprintf(stderr, "ERROR: no xsks map found: %s\n",
-                    strerror(xsks_map));
-            exit(EXIT_FAILURE);
-        }
+        // int programFD = xdp_program__fd(xdp_prog.program);
+        // int xsks_map = lookup_bpf_map(programFD);
+        // if (xsks_map < 0) {
+            // fprintf(stderr, "ERROR: no xsks map found: %s\n",
+                    // strerror(xsks_map));
+            // exit(EXIT_FAILURE);
+        // }
 
-        int key = 0;
-        int fd = xskFD;
-        ret = bpf_map_update_elem(xsks_map, &key, &fd, BPF_ANY);
-        if (ret != 0) {
-            cerr << "bpf_map_update_elem Errno: " << -ret << endl;
-            exit(EXIT_FAILURE);
-        }
-
+        // int key = 0;
+        // int fd = xskFD;
+        // ret = bpf_map_update_elem(xsks_map, &key, &fd, BPF_ANY);
+        // if (ret != 0) {
+            // cerr << "bpf_map_update_elem Errno: " << -ret << endl;
+            // exit(EXIT_FAILURE);
+        // }
 
         assert(xskFD > 2);
         int sock_opt = 1;
-        if (setsockopt(xskFD, SOL_SOCKET, SO_PREFER_BUSY_POLL,
-                       (void *) &sock_opt, sizeof(sock_opt)) < 0) {
-            perror("No busy poll");
-            exit(EXIT_FAILURE);
-        }
-
+        // if (setsockopt(xskFD, SOL_SOCKET, SO_PREFER_BUSY_POLL,
+                       // (void *) &sock_opt, sizeof(sock_opt)) < 0) {
+            // perror("No busy poll");
+        // }
         sock_opt = 100;
         if (setsockopt(xskFD, SOL_SOCKET, SO_BUSY_POLL,
                        (void *) &sock_opt, sizeof(sock_opt)) < 0) {
@@ -369,29 +366,50 @@ public:
 
     explicit Sender(XDPManager& xdp): sock{xdp.xsk}, umem{xdp.umem}, seqNoOut{}, tx{&xdp.xsk.tx},
                                       cq{&xdp.umem.completionQ}, packetBuffered{false}, servaddr{} {
-        // Create a socket
-        //sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-        //if (sockfd < 0) {
-        //    std::cerr << "Socket creation failed" << std::endl;
-        //    exit(EXIT_FAILURE);
-        //}
+         // Create a socket
+        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sockfd < 0) {
+            std::cerr << "Socket creation failed" << std::endl;
+            exit(EXIT_FAILURE);
+        }
 
-        //// Fill in server information
-        //memset(&servaddr, 0, sizeof(servaddr));
-        //servaddr.sin_family = AF_INET;
-        //servaddr.sin_port = htons(4321);
-        //servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        // Fill in server information
+        memset(&servaddr, 0, sizeof(servaddr));
+        servaddr.sin_family = AF_INET;
+        servaddr.sin_port = htons(4321);
+        servaddr.sin_addr.s_addr = inet_addr("13.40.166.252");
     }
 
 
-    void prepareIndependentPacket() {
+    void prepareIndependentPacket(u32 addr) {
         vector<u8> packetData = {
-            0x45, 0x00, 0x00, 0x2f, 0xa9, 0x37, 0x40, 0x00, 0x40, 0x11,
+            0x48, 0xd3, 0x43, 0xe9, 0x5c, 0xa0, 0x3c, 0xe9, 0xf7, 0xfe, 0xdf, 0x6c,
+            0x08, 0x00, 0x45, 0x00, 0x00, 0x2f, 0xa9, 0x37, 0x40, 0x00, 0x40, 0x11,
             0x1c, 0x52, 0xc0, 0xa8, 0x00, 0x68,
             0x0d, 0x28, 0xa6, 0xfc, 0xb0, 0x82, 0x10, 0xe1, 0x00, 0x1b, 0x75, 0x61, 0x02, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x62, 0x00, 0x00, 0x00, 0x00
         };
 
+        assert(!packetBuffered);
+
+        u32 txIdx = -1;
+        assert(tx != nullptr);
+        const u32 txSlotsRecvd = xsk_ring_prod__reserve(tx, 1, &txIdx);
+        assert(txIdx < XSK_RING_PROD__DEFAULT_NUM_DESCS);
+        assert(txSlotsRecvd == 1);
+
+        xdp_desc* txDescr = xsk_ring_prod__tx_desc(tx, txIdx);
+        assert(nullptr != txDescr);
+        txDescr->addr = addr;
+        txDescr->len = sizeof(PacketOut);
+        txDescr->options = 0;
+        PacketOut* umemLoc = reinterpret_cast<PacketOut *>(umem.umemArea + addr);
+
+        copy(packetData.begin(), packetData.end(), reinterpret_cast<u8 *>(umemLoc));
+
+        lastData = reinterpret_cast<char *>(&umemLoc->packetType);
+        hex_dump(reinterpret_cast<const u8*>(umemLoc), sizeof(PacketOut), 0);
+        packetBuffered = true;
     }
 
     void prepare(const xdp_desc* readDesc, char side, Price price, int seqNoIn) {
@@ -505,12 +523,12 @@ public:
             }
 
            // Data to be sent
-//            assert(nullptr != lastData);
-//            const ssize_t len = sendto(sockfd, lastData, sizeof(order_data) + 6, 0, reinterpret_cast<const struct sockaddr *>(&servaddr),
-//                                       sizeof(servaddr));
-//            if (len <= 0) {
-//                std::cerr << "Send failed" << std::endl;
- //           }
+            // assert(nullptr != lastData);
+            // const ssize_t len = sendto(sockfd, lastData, sizeof(order_data) + 6, 0, reinterpret_cast<const struct sockaddr *>(&servaddr),
+                                       // sizeof(servaddr));
+            // if (len <= 0) {
+                // std::cerr << "Send failed" << std::endl;
+            // }
             lastData = nullptr;
             packetBuffered = false;
             return true;
@@ -647,8 +665,12 @@ public:
     OB ob(s);
     Receiver r(xdp, ob, s);
 
-    while (true) {
-        r.recv();
+    //while (true) {
+        // r.recv();
+        s.prepareIndependentPacket(256);
+        s.trigger();
+        usleep(100000);
         s.complete();
-    }
+        usleep(100000000);
+    //}
 }
