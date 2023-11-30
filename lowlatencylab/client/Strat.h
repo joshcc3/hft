@@ -162,7 +162,6 @@ public:
     }
 
     void recvUdpMD() {
-        const auto curTime = currentTimeNs();
 
         assert(!udpBuf.test(0));
         assert(orderEntry.isConnected());
@@ -174,54 +173,92 @@ public:
         const bool isAlive = isConnected();
 
         if (__builtin_expect(isAlive, true)) {
-            const u8* inBuf;
-            u32 bytesReadWithPhy;
-            const xdp_desc* readDesc;
 
-            CLOCK(SYS_RECV_PC,
-                const auto& res = io.recvBlocking();
-                inBuf = res.readAddr;
-                bytesReadWithPhy = res.len;
-                readDesc = res.readDesc;
+
+            io.qs.stateCheck();
+            io.umem.stateCheck();
+            io.socket.stateCheck();
+
+            // if we get multiple out of order packets then we should process them smartly - last to first.
+            u32 available;
+            u32 idx;
+            while ((available = xsk_ring_cons__peek(&io.qs.rxQ, XSKQueues::NUM_READ_DESC, &idx)) == 0) {}
+
+            u32 fillQIdx;
+            u32 reserved;
+            while((reserved = xsk_ring_prod__reserve(&io.qs.fillQ, available, &fillQIdx)) == 0) {}
+            assert(reserved == available);
+
+            for(int i = 0; i < available; ++i) {
+                const auto curTime = currentTimeNs();
+
+                const xdp_desc* readDesc = xsk_ring_cons__rx_desc(&io.qs.rxQ, idx + i);
+                const __u64 addr = readDesc->addr;
+                const __u32 len = readDesc->len;
+                const __u32 options = readDesc->options;
+
+                assert(xsk_umem__extract_addr(addr) == addr);
+                assert(xsk_umem__extract_offset(addr) == 0);
+                assert(options == 0);
+                assert((u64(io.umem.buffer) & 4095) == 0);
+                assert((addr & 255) == 0 && ((addr - 256) & (io.umem.FRAME_SIZE - 1)) == 0);
+                assert(addr < io.umem.FRAME_SIZE * (io.umem.NUM_FRAMES - 1));
+                assert(len < io.umem.FRAME_SIZE);
+
+                u8* readAddr = static_cast<u8 *>(xsk_umem__get_data(io.umem.buffer, addr));
+
+                assert(readAddr == io.umem.buffer + addr);
+
+
+                const u8* inBuf = readAddr;
+                u32 bytesReadWithPhy = len;
                 assert(inBuf != nullptr);
-            )
-            assert(bytesReadWithPhy > 0);
-            assert(bytesReadWithPhy <= READ_BUF_SZ);
 
-            assert((reinterpret_cast<u64>(inBuf) & 127) == 0);
-            const MDFrame* packet = reinterpret_cast<const MDFrame *>(inBuf);
-            assert(packet->eth.h_proto == htons(ETH_P_IP));
-            assert(packet->ip.version == 4);
-            assert(packet->ip.ihl == 5);
-            assert(htons(packet->ip.tot_len) == bytesReadWithPhy - sizeof(ethhdr));
-            assert((htons(packet->ip.tot_len) - sizeof(iphdr) - sizeof(udphdr)) % sizeof(MDPacket) == 0);
-            //assert((packet->ip.frag_off & 0x1fff) == 0);
-            assert(((packet->ip.frag_off >> 13) & 1) == 0);
-            assert(((packet->ip.frag_off >> 15) & 1) == 0);
-            assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
+                assert(bytesReadWithPhy > 0);
+                assert(bytesReadWithPhy <= READ_BUF_SZ);
 
-            const u8* dataBuf = inBuf + sizeof(MDFrame);
-            u32 bytesRead = bytesReadWithPhy - sizeof(MDFrame);
+                assert((reinterpret_cast<u64>(inBuf) & 127) == 0);
+                const MDFrame* packet = reinterpret_cast<const MDFrame *>(inBuf);
+                assert(packet->eth.h_proto == htons(ETH_P_IP));
+                assert(packet->ip.version == 4);
+                assert(packet->ip.ihl == 5);
+                assert(htons(packet->ip.tot_len) == bytesReadWithPhy - sizeof(ethhdr));
+                assert((htons(packet->ip.tot_len) - sizeof(iphdr) - sizeof(udphdr)) % sizeof(MDPacket) == 0);
+                //assert((packet->ip.frag_off & 0x1fff) == 0);
+                assert(((packet->ip.frag_off >> 13) & 1) == 0);
+                assert(((packet->ip.frag_off >> 15) & 1) == 0);
+                assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
 
-            const u64 numPackets = bytesRead / sizeof(MDPacket);
-            assert(bytesRead % sizeof(MDPacket) == 0);
+                const u8* dataBuf = inBuf + sizeof(MDFrame);
+                u32 bytesRead = bytesReadWithPhy - sizeof(MDFrame);
 
-            assert(checkMessageDigest(dataBuf, bytesRead));
+                const u64 numPackets = bytesRead / sizeof(MDPacket);
+                assert(bytesRead % sizeof(MDPacket) == 0);
 
-            const u8* endBuf = handleMessages(dataBuf, numPackets, curTime);
-            assert(endBuf == dataBuf + sizeof(MDPacket) * numPackets);
+                assert(checkMessageDigest(dataBuf, bytesRead));
+
+                const u8* endBuf = handleMessages(dataBuf, numPackets, curTime);
+                assert(endBuf == dataBuf + sizeof(MDPacket) * numPackets);
 
 
-            const TimeNs now = currentTimeNs();
-            assert(lastReceivedNs == 0 || now - lastReceivedNs < 100'000'000);
-            lastReceivedNs = now;
-            io.completeRead(readDesc);
+                const TimeNs now = currentTimeNs();
+                // assert(lastReceivedNs == 0 || now - lastReceivedNs < 100'000'000);
+                lastReceivedNs = now;
+
+                unsigned long long* fillQEntry = xsk_ring_prod__fill_addr(&io.qs.fillQ, fillQIdx + i);
+                assert(fillQEntry != nullptr);
+                *fillQEntry = readDesc->addr;
+
+            }
+
+            assert(!xsk_ring_prod__needs_wakeup(&io.qs.fillQ));
+            xsk_ring_cons__release(&io.qs.rxQ, available);
+            xsk_ring_prod__submit(&io.qs.fillQ, available);
+
+            assert(!udpBuf.test(0));
+            assert(ogSeqNo == udpBuf.nextMissingSeqNo || cursor > ogCursor && (ogMask == 0 || ogMask != udpBuf.mask));
+            assert(cursor >= ogCursor);
         }
-
-
-        assert(!udpBuf.test(0));
-        assert(ogSeqNo == udpBuf.nextMissingSeqNo || cursor > ogCursor && (ogMask == 0 || ogMask != udpBuf.mask));
-        assert(cursor >= ogCursor);
     }
 
     [[nodiscard]] bool isConnected() const noexcept {

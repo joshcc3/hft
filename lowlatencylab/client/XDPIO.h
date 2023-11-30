@@ -22,10 +22,10 @@
 
 
 struct XSKQueues {
-    constexpr static int NUM_READ_DESC = XSK_RING_CONS__DEFAULT_NUM_DESCS;
-    constexpr static int NUM_WRITE_DESC = XSK_RING_PROD__DEFAULT_NUM_DESCS;
-    constexpr static int NUM_FILL_DESC = XSK_RING_PROD__DEFAULT_NUM_DESCS;
-    constexpr static int NUM_COMPLETION_DESC = XSK_RING_CONS__DEFAULT_NUM_DESCS;
+    constexpr static int NUM_READ_DESC = XSK_RING_CONS__DEFAULT_NUM_DESCS * 8;
+    constexpr static int NUM_WRITE_DESC = XSK_RING_PROD__DEFAULT_NUM_DESCS * 8;
+    constexpr static int NUM_FILL_DESC = XSK_RING_PROD__DEFAULT_NUM_DESCS * 16;
+    constexpr static int NUM_COMPLETION_DESC = XSK_RING_CONS__DEFAULT_NUM_DESCS * 8;
     xsk_ring_cons completionQ{};
     xsk_ring_prod fillQ{};
     xsk_ring_prod txQ{};
@@ -40,8 +40,8 @@ struct XSKQueues {
 };
 
 struct XSKUmem {
-    constexpr static int NUM_FRAMES = 1 << 12;
-    constexpr static int FRAME_SIZE = 1 << 10;
+    constexpr static int NUM_FRAMES = 1 << 14;
+    constexpr static int FRAME_SIZE = 1 << 12;
 
     xsk_umem* umem{};
     u8* buffer{};
@@ -50,7 +50,7 @@ struct XSKUmem {
         constexpr int bufferSz = XSKUmem::NUM_FRAMES * XSKUmem::FRAME_SIZE;
         buffer = static_cast<u8 *>(mmap(nullptr, bufferSz,
                                         PROT_READ | PROT_WRITE,
-                                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+                                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0));
         if (buffer == MAP_FAILED) {
             printf("ERROR: mmap failed\n");
             exit(EXIT_FAILURE);
@@ -67,7 +67,7 @@ struct XSKUmem {
         assert(umem == nullptr);
 
         if (xsk_umem__create(&umem, buffer, bufferSz, &qs.fillQ, &qs.completionQ,
-                             nullptr)) {
+                             &cfg)) {
             perror("Umem: ");
             exit(EXIT_FAILURE);
         }
@@ -192,11 +192,11 @@ struct RecvRes {
 
 
 class XDPIO {
+public:
     XSKQueues qs;
     XSKUmem umem;
     XSKSocket socket;
 
-public:
     explicit XDPIO(const std::string& iface, const std::string& xdpProgPinPath): qs{}, umem{qs}, socket{umem, qs, iface, xdpProgPinPath} {
         const rlimit r = {RLIM_INFINITY, RLIM_INFINITY};
         if (setrlimit(RLIMIT_MEMLOCK, &r)) {
@@ -218,61 +218,6 @@ public:
             *xsk_ring_prod__fill_addr(&qs.fillQ, idx++) = i * XSKUmem::FRAME_SIZE;
         }
         xsk_ring_prod__submit(&qs.fillQ, XSKQueues::NUM_FILL_DESC);
-    }
-
-    RecvRes recvBlocking() {
-        qs.stateCheck();
-        umem.stateCheck();
-        socket.stateCheck();
-
-        // if we get multiple out of order packets then we should process them smartly - last to first.
-        u32 available;
-        u32 idx;
-        while ((available = xsk_ring_cons__peek(&qs.rxQ, 1, &idx)) == 0) {
-        }
-        assert(available == 1);
-        assert(xsk_prod_nb_free(&qs.fillQ, XSKQueues::NUM_FILL_DESC) == xsk_cons_nb_avail(&qs.rxQ, XSKQueues::NUM_READ_DESC) + 1);
-        assert(idx < XSKQueues::NUM_READ_DESC);
-
-        const xdp_desc* readDesc = xsk_ring_cons__rx_desc(&qs.rxQ, idx);
-        const __u64 addr = readDesc->addr;
-        const __u32 len = readDesc->len;
-        const __u32 options = readDesc->options;
-
-        assert(xsk_umem__extract_addr(addr) == addr);
-        assert(xsk_umem__extract_offset(addr) == 0);
-        assert(options == 0);
-        assert((u64(umem.buffer) & 4095) == 0);
-        assert((addr & 255) == 0 && ((addr - 256) & (umem.FRAME_SIZE - 1)) == 0);
-        assert(addr < umem.FRAME_SIZE * (umem.NUM_FRAMES - 1));
-        assert(len < umem.FRAME_SIZE);
-
-        u8* readAddr = static_cast<u8 *>(xsk_umem__get_data(umem.buffer, addr));
-
-        assert(readAddr == umem.buffer + addr);
-
-        return {readAddr, len, readDesc};
-    }
-
-    void completeRead(const xdp_desc* readDesc) {
-        if (readDesc != nullptr) {
-            u32 idx = *qs.rxQ.consumer & qs.rxQ.mask;
-            xsk_ring_cons__release(&qs.rxQ, 1);
-
-            assert(!xsk_ring_prod__needs_wakeup(&qs.fillQ));
-            const u32 reserved = xsk_ring_prod__reserve(&qs.fillQ, 1, &idx);
-            assert(idx >= 0 && idx < XSKQueues::NUM_FILL_DESC * 2);
-            assert(reserved == 1);
-
-            unsigned long long* fillQEntry = xsk_ring_prod__fill_addr(&qs.fillQ, idx);
-            assert(fillQEntry != nullptr);
-            *fillQEntry = readDesc->addr;
-            xsk_ring_prod__submit(&qs.fillQ, 1);
-        } else {
-#ifndef STRAT_XDP_FOR_XMIT
-            assert(false);
-#endif
-        }
     }
 
     u8* getWriteBuff(ssize_t sz);
