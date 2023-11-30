@@ -145,7 +145,6 @@ public:
                         unsigned int pending = io_uring_sq_ready(&ioState.ring);
                         assert(pending <= 2);
                         if (!md.isEOF() && oe.connectionAlive()) {
-                            usleep(1);
                             md.send();
                         }
                     }
