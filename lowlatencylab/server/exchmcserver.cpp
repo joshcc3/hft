@@ -237,8 +237,8 @@ private:
 };
 
 int main() {
-    const string &ofname = "/home/jc/CLionProjects/hft/data/trades_500M.csv";
-    const string &fname = "/home/jc/CLionProjects/hft/data/deribit_incremental_book_L2_2020-04-01_BTC-PERPETUAL.csv.gz";
+    const string &ofname = "data/trades_500M.csv";
+    const string &fname = "data/deribit_incremental_book_L2_2019-07-01_BTC-PERPETUAL.csv.gz";
     std::ifstream ifile(fname, std::ios_base::in | std::ios_base::binary);
     if (!ifile) {
         std::cerr << "Failed to open the file." << std::endl;

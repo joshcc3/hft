@@ -26,10 +26,9 @@ public:
 
     bool isComplete = false;
 
-    XDPIO& xdpIO;
+    XDPIO& io;
     L2OB& ob;
     OE& orderEntry;
-    XDPIO& io;
 
     UDPBuffer<PacketProcessor<Strat>> udpBuf{};
     SeqNo cursor = 0;
@@ -96,7 +95,6 @@ public:
         assert(numPackets > 0);
         assert(time > 0);
         assert(time > lastReceivedNs);
-        assert(mdFD != -1);
 
         UDPBuffer<Strat>::MaskType ogMask = udpBuf.mask;
         u32 ogLowestSeqNum = udpBuf.nextMissingSeqNo;
@@ -165,7 +163,6 @@ public:
     void recvUdpMD() {
         auto curTime = currentTimeNs();
 
-        assert(mdFD > 2);
         assert(!udpBuf.test(0));
         assert(orderEntry.isConnected());
 
@@ -176,7 +173,7 @@ public:
         bool isAlive = isConnected();
 
         if (__builtin_expect(isAlive, true)) {
-            const auto& [inBuf, bytesRead] = io.recvBlocking();
+            const auto& [inBuf, bytesRead, readDesc] = io.recvBlocking();
             assert(inBuf != nullptr);
             // CLOCK(SYS_RECV_PC,
             // )
@@ -195,7 +192,7 @@ public:
             TimeNs now = currentTimeNs();
             assert(lastReceivedNs == 0 || now - lastReceivedNs < 100'000'000);
             lastReceivedNs = now;
-            io.completeRead(inBuf, bytesRead);
+            io.completeRead(readDesc);
         }
 
 

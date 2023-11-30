@@ -15,3 +15,7 @@ The XDP code sample included in tools/lib/bpf/xsk.c is the following:
 
 
 https://www.kernel.org/doc/html/v5.3/networking/af_xdp.html
+
+
+what is a cancellation point
+differnece between reinterpret_cast and force cast

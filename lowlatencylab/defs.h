@@ -22,7 +22,7 @@
 #include <iostream>
 #include <unordered_map>
 
-#define NDEBUG
+// #define NDEBUG
 
 #ifdef NDEBUG
 #undef assert

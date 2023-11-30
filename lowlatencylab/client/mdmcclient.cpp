@@ -30,9 +30,10 @@ class Driver {
     IOUringState ioState{};
     int fileTable[1]{};
 
+    XDPIO io{"lo"};
     L2OB ob{};
-    OE oe{ioState};
-    Strat strat{oe, ob};
+    OE oe{ioState, "lll-1.oe"};
+    Strat strat{oe, ob, io};
 
 public:
 
@@ -42,17 +43,12 @@ public:
             assert(stateCheck());
             switch (state) {
                 case StrategyState::INIT: {
-                    assert(strat.mdFD != -1);
                     assert(!oe.isConnected());
-                    assert(fileTable[0] != strat.mdFD);
-                    fileTable[0] = strat.mdFD;
-                    io_uring_register_files(&ioState.ring, fileTable, 1);
 
                     state = StrategyState::OE_CONNECT;
                     break;
                 }
                 case StrategyState::OE_CONNECT: {
-                    assert(strat.mdFD != -1);
                     assert(!oe.isConnected());
                     assert(io_uring_sq_ready(&ioState.ring) == 0);
                     assert(io_uring_cq_ready(&ioState.ring) == 0);
@@ -95,30 +91,6 @@ public:
                         prevCheckpoint = cTime;
                     }
 //                    assert(std::abs(currentTimeNs() - strat.lastReceivedNs) < 10'000'000);
-
-                    if (u32 ready = io_uring_cq_ready(&ioState.ring)) {
-                        unsigned head;
-                        unsigned processed = 0;
-                        struct io_uring_cqe *cqe;
-                        io_uring_for_each_cqe(&ioState.ring, head, cqe) {
-                            assert(nullptr != cqe);
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "NullDereference"
-                            io_uring_cqe &e = *cqe;
-#pragma clang diagnostic pop
-                            u64 userData = io_uring_cqe_get_data64(&e);
-                            if (userData >= OE::ORDER_TAG) {
-                                oe.completeMessage(e);
-                            } else {
-                                cerr << "Unexpected userdata [" << userData << "]";
-                                throw std::runtime_error("Unexpected");
-                                assert(false);
-                            }
-                            ++processed;
-                        }
-                        assert(processed >= ready);
-                        io_uring_cq_advance(&ioState.ring, processed);
-                    }
 
                     assert(strat.isConnected() || !strat.isComplete);
                     break;

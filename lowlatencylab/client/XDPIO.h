@@ -32,7 +32,7 @@ struct XSKQueues {
     xsk_ring_cons rxQ{};
 
     void stateCheck() {
-        assert(rxQ.mask == 0);
+        assert(rxQ.mask != 0);
         assert(completionQ.mask != 0);
         assert(fillQ.mask != 0);
         assert(txQ.mask != 0);
@@ -64,7 +64,7 @@ struct XSKUmem {
             .flags = 0
         };
 
-        assert(umem.umem == nullptr);
+        assert(umem == nullptr);
 
         if (xsk_umem__create(&umem, buffer, bufferSz, &qs.fillQ, &qs.completionQ,
                              nullptr)) {
@@ -96,7 +96,7 @@ struct XSKSocket {
         cfg.bind_flags = XDP_USE_NEED_WAKEUP | XDP_COPY;
 
         if (int ret = xsk_socket__create(&socket, iface.c_str(), QUEUE, umem.umem,
-                                         nullptr, &qs.txQ, &cfg)) {
+                                         &qs.rxQ, &qs.txQ, &cfg)) {
             perror("XSK: ");
             exit(EXIT_FAILURE);
         }
@@ -142,15 +142,9 @@ public:
         while ((available = xsk_ring_cons__peek(&qs.rxQ, XSKQueues::NUM_READ_DESC, &idx)) == 0) {}
         assert(available == 1);
         assert(xsk_cons_nb_avail(&qs.rxQ, XSKQueues::NUM_READ_DESC) == 0);
-        assert(xsk_prod_nb_free(&qs.fillQ) == XSKQueues::NUM_FILL_DESC);
-        assert(idx >= 0 && idx < XSKQueues::NUM_READ_DESC);
+        assert(xsk_prod_nb_free(&qs.fillQ, XSKQueues::NUM_FILL_DESC) == XSKQueues::NUM_FILL_DESC);
+        assert(idx < XSKQueues::NUM_READ_DESC);
 
-        // xsk_ring_cons;
-        // xsk_ring_cons__comp_addr();
-        // xsk_ring_cons__peek();
-        // xsk_ring_cons__release();
-        // xsk_ring_cons__rx_desc();
-        //
 
         const xdp_desc* readDesc = xsk_ring_cons__rx_desc(&qs.rxQ, idx);
         __u64 addr = readDesc->addr;
@@ -160,7 +154,7 @@ public:
         assert(xsk_umem__extract_addr(addr) == addr);
         assert(xsk_umem__extract_offset(addr) == 0);
         assert(options == 0);
-        assert(umem.buffer & 4095 == 0);
+        assert(u64(umem.buffer) & 4095 == 0);
         assert((addr & 255) == 0 && ((addr - 255) & (umem.FRAME_SIZE - 1)) == 0);
         assert(addr < umem.FRAME_SIZE * (umem.NUM_FRAMES - 1));
         assert(len < umem.FRAME_SIZE);
@@ -174,7 +168,6 @@ public:
 
     void completeRead(const xdp_desc* readDesc) {
         if(readDesc != nullptr) {
-            assert(readAddr >= umem.buffer && readAddr <= umem.buffer + XSKUmem::FRAME_SIZE * (XSKUmem::NUM_FRAMES - 1));
             xsk_ring_cons__release(&qs.rxQ, 1);
 
             assert(!xsk_ring_prod__needs_wakeup(&qs.fillQ));

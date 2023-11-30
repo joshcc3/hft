@@ -65,5 +65,5 @@ add_executable(xdp_test
 target_link_libraries(networking uring)
 target_link_libraries(cubist Boost::iostreams)
 target_link_libraries(lll_exchange Boost::iostreams uring)
-target_link_libraries(lll_strategy uring)
+target_link_libraries(lll_strategy uring xdp bpf)
 target_link_libraries(xdp_test xdp bpf)
