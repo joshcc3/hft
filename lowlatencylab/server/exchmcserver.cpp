@@ -145,11 +145,7 @@ public:
                         unsigned int pending = io_uring_sq_ready(&ioState.ring);
                         assert(pending <= 2);
                         if (!md.isEOF() && oe.connectionAlive()) {
-                            // if(md.cursor >= 4000 && md.cursor <= 4010) {
-                                // cout << "Pausing" << endl;
-                                // usleep(1000000);
-                            // }
-                            usleep(100);
+                            usleep(1);
                             md.send();
                         }
                     }

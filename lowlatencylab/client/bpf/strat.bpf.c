@@ -54,7 +54,6 @@ int strat(struct xdp_md *ctx)
   void* data_end = (void*)(long)ctx->data_end;
   if((data + sizeof(struct Packet)) >= data_end) {
     u64 sz = data_end - data;
-    bpf_printk("small packet: %d", sz);
     return XDP_PASS;
   } else {
 
@@ -64,7 +63,6 @@ int strat(struct xdp_md *ctx)
     }
 
     if(p->packetType == 1 && p->udp.dest == htons(MD_UNICAST_PORT)) {
-      bpf_printk("Fwd MD Packet");
       return bpf_redirect_map(&mdRedirMap, 0, XDP_PASS);
     } else if(p->udp.dest == htons(MD_UNICAST_PORT)) {
       bpf_printk("Malformed udp packet to md unicast port");
