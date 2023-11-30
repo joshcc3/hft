@@ -8,89 +8,38 @@
 
 #include <cstring>
 #include <unistd.h>
-#include <cstdlib>
 #include <cstdio>
 #include <sched.h>
 #include <new>
 #include <cassert>
-#include <bitset>
-#include <memory>
-#include <x86intrin.h>
-#include <arpa/inet.h>
-#include <netinet/tcp.h>
-#include <netinet/ip.h>
 #include <netinet/in.h>
-#include <array>
 #include "OE.h"
 #include "../defs.h"
 #include "L2OB.h"
 #include "mdmcclient.h"
 #include "UDPBuffer.h"
+#include "XDPIO.h"
 
 class Strat : public PacketProcessor<Strat> {
 public:
-
     static constexpr u32 READ_BUF_SZ = 1 << 12;
 
     bool isComplete = false;
 
-    L2OB &ob;
-    OE &orderEntry;
+    XDPIO& xdpIO;
+    L2OB& ob;
+    OE& orderEntry;
+    XDPIO& io;
 
-    std::unique_ptr<u8[]> readBuf;
     UDPBuffer<PacketProcessor<Strat>> udpBuf{};
-    int mdFD = -1;
     SeqNo cursor = 0;
     TimeNs lastReceivedNs = 0;
     SeqNo lastReceivedSeqNo = -1;
 
 
-    Strat(OE &oe, L2OB &ob) : readBuf{std::make_unique<u8[]>(READ_BUF_SZ)},
-                              orderEntry{oe},
-                              ob{ob} {
-
-        mdFD = socket(AF_INET, SOCK_DGRAM, 0);
-        if (mdFD < 0) {
-            perror("Strat socket");
-            exit(EXIT_FAILURE);
-        }
-
-        int enable = 1;
-        if (setsockopt(mdFD, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0) {
-            perror("MD Reusing ADDR failed");
-            close(mdFD);
-            exit(EXIT_FAILURE);
-        }
-
-        if (setsockopt(mdFD, SOL_SOCKET, SO_INCOMING_CPU, &PINNED_CPU, sizeof(PINNED_CPU)) < 0) {
-            perror("MD Cpu Affinity failed.");
-            close(mdFD);
-            exit(EXIT_FAILURE);
-        }
-
-
-        struct sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = inet_addr(MD_UNICAST_ADDR.c_str());
-        addr.sin_port = htons(MD_UNICAST_PORT);
-
-        // Bind to receive address
-        if (bind(mdFD, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
-            perror("MD bind");
-            close(mdFD);
-            exit(EXIT_FAILURE);
-        }
-
-
-    }
-
-    ~Strat() {
-        if (mdFD != -1) {
-            if (close(mdFD) == -1) {
-                perror("Failed to locse md");
-            }
-            mdFD = -1;
-        }
+    Strat(OE& oe, L2OB& ob, XDPIO& io) : orderEntry{oe},
+                                         ob{ob},
+                                         io{io} {
     }
 
     template<Side side>
@@ -98,7 +47,7 @@ public:
     checkTrade(SeqNo seqNo, TimeNs mdTime, bool isSnapshot, TimeNs localTimestamp,
                PriceL price,
                Qty qty) {
-        const auto &[bestBid, bestAsk, bidSize, askSize] = ob.update(isSnapshot, side, localTimestamp, price, qty);
+        const auto& [bestBid, bestAsk, bidSize, askSize] = ob.update(isSnapshot, side, localTimestamp, price, qty);
         if (!isSnapshot) {
             SeqNo triggerEvent = seqNo;
             TimeNs recvTime = mdTime;
@@ -128,20 +77,20 @@ public:
                     PriceL tradePrice = oppSidePrice;
                     OrderFlags flags{.isBid = !isBid};
                     CLOCK(ORDER_SUBMISSION_PC,
-                            orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
+                          orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
                     )
                 } else if (notionalChange < -TRADE_THRESHOLD) {
                     PriceL tradePrice = sidePrice;
                     OrderFlags flags{.isBid = isBid};
                     CLOCK(ORDER_SUBMISSION_PC,
-                            orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
+                          orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
                     )
                 }
             }
         }
     }
 
-    const u8 *handleMessages(const u8 *inBuf, u64 numPackets, TimeNs time) {
+    const u8* handleMessages(const u8* inBuf, u64 numPackets, TimeNs time) {
         assert(!isComplete);
         assert(inBuf != nullptr);
         assert(numPackets > 0);
@@ -154,11 +103,10 @@ public:
         u32 ogHead = udpBuf.head;
         OrderId ogCurOrder = orderEntry.curOrder.id;
 
-        const u8 *finalBufPos = inBuf;
+        const u8* finalBufPos = inBuf;
 
         for (int i = 0; i < numPackets; ++i) {
-
-            const MDPacket &packet = *reinterpret_cast<const MDPacket *>(finalBufPos);
+            const MDPacket& packet = *reinterpret_cast<const MDPacket *>(finalBufPos);
             TimeNs timeDelay = currentTimeNs() - packet.localTimestamp;
             assert(timeDelay <= 5'000'000'000);
             assert(packet.seqNo >= 0 || packet.flags.isTerm);
@@ -174,10 +122,9 @@ public:
         assert(finalBufPos - inBuf == numPackets * sizeof(MDPacket));
 
         return finalBufPos;
-
     }
 
-    void processPacket(TimeNs time, const MDPacket &p) {
+    void processPacket(TimeNs time, const MDPacket& p) {
         assert(!isComplete);
         isComplete = p.flags.isTerm;
         if (__builtin_expect(!isComplete, true)) {
@@ -200,14 +147,13 @@ public:
                 }
                 isSnapshotting = isSnapshot;
                 if (p.flags.isBid) {
-
                     checkTrade<Side::BUY>(seqNo, time, isSnapshot, localTimestamp, price, qty);
                 } else {
                     checkTrade<Side::SELL>(seqNo, time, isSnapshot, localTimestamp, price, qty);
                 }
             } else {
                 CLOCK(BOOK_UPDATE_PC,
-                ob.cancel(localTimestamp, price, p.flags.isBid ? BUY : SELL);
+                      ob.cancel(localTimestamp, price, p.flags.isBid ? BUY : SELL);
                 )
             }
 
@@ -230,42 +176,39 @@ public:
         bool isAlive = isConnected();
 
         if (__builtin_expect(isAlive, true)) {
-
-            ssize_t bytesRead;
-            CLOCK(SYS_RECV_PC,
-                    bytesRead = recvfrom(mdFD, readBuf.get(), READ_BUF_SZ, MSG_TRUNC, nullptr, nullptr);
-            )
+            const auto& [inBuf, bytesRead] = io.recvBlocking();
+            assert(inBuf != nullptr);
+            // CLOCK(SYS_RECV_PC,
+            // )
             assert(bytesRead > 0);
             assert(bytesRead <= READ_BUF_SZ);
 
             u64 numPackets = bytesRead / sizeof(MDPacket);
             assert(bytesRead % sizeof(MDPacket) == 0);
-            u8 *const inBuf = readBuf.get();
 
             assert(checkMessageDigest(inBuf, bytesRead));
 
-            const u8 *endBuf = handleMessages(inBuf, numPackets, curTime);
+            const u8* endBuf = handleMessages(inBuf, numPackets, curTime);
             assert(endBuf == inBuf + sizeof(MDPacket) * numPackets);
 
 
             TimeNs now = currentTimeNs();
             assert(lastReceivedNs == 0 || now - lastReceivedNs < 100'000'000);
             lastReceivedNs = now;
-
+            io.completeRead(inBuf, bytesRead);
         }
 
 
         assert(!udpBuf.test(0));
         assert(ogSeqNo == udpBuf.nextMissingSeqNo || cursor > ogCursor && (ogMask == 0 || ogMask != udpBuf.mask));
         assert(cursor >= ogCursor);
-
     }
 
     [[nodiscard]] bool isConnected() const noexcept {
         TimeNs now = currentTimeNs();
-//        bool notDelayed = std::abs(now - lastReceivedNs) < 10'000'000;
-//        return !isComplete && mdFD != -1 && (lastReceivedNs == 0 || notDelayed);
-        return !isComplete && mdFD != -1;
+        //        bool notDelayed = std::abs(now - lastReceivedNs) < 10'000'000;
+        //        return !isComplete && mdFD != -1 && (lastReceivedNs == 0 || notDelayed);
+        return !isComplete;
     }
 };
 
