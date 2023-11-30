@@ -24,7 +24,7 @@
 struct XSKQueues {
     constexpr static int NUM_READ_DESC = XSK_RING_CONS__DEFAULT_NUM_DESCS;
     constexpr static int NUM_WRITE_DESC = XSK_RING_PROD__DEFAULT_NUM_DESCS;
-    constexpr static int NUM_FILL_DESC = XSK_RING_PROD__DEFAULT_NUM_DESCS * 2;
+    constexpr static int NUM_FILL_DESC = XSK_RING_PROD__DEFAULT_NUM_DESCS;
     constexpr static int NUM_COMPLETION_DESC = XSK_RING_CONS__DEFAULT_NUM_DESCS;
     xsk_ring_cons completionQ{};
     xsk_ring_prod fillQ{};
@@ -74,7 +74,7 @@ struct XSKUmem {
     }
 
 
-    void stateCheck() {
+    void stateCheck() const {
         assert(buffer != nullptr);
     }
 };
@@ -86,7 +86,7 @@ struct XSKSocket {
     int xskFD{-1};
     xsk_socket* socket{};
 
-    XSKSocket(const XSKUmem& umem, XSKQueues& qs, const std::string& iface) {
+    XSKSocket(const XSKUmem& umem, XSKQueues& qs, const std::string& iface, const std::string& xdpProgPinPath) {
         xsk_socket_config cfg{};
 
         cfg.rx_size = XSKQueues::NUM_READ_DESC;
@@ -102,19 +102,94 @@ struct XSKSocket {
         }
 
         xskFD = xsk_socket__fd(socket);
+        assert(xskFD > 2);
+
+        const xdp_program* program = xdp_program__from_pin(xdpProgPinPath.c_str());
+        if (nullptr == program) {
+            cerr << "Failed to get program" << endl;
+            exit(EXIT_FAILURE);
+        }
+
+        const int programFD = xdp_program__fd(program);
+        assert(programFD > xskFD);
+        const int xsksMapFD = lookupBPFMap(programFD);
+        if (xsksMapFD < 0) {
+            cerr << "ERROR: no xsks map found: " << xsksMapFD << endl;
+            exit(EXIT_FAILURE);
+        }
+
+        const int key = 0;
+        const int fd = xskFD;
+        const u32 ret = bpf_map_update_elem(xsksMapFD, &key, &fd, BPF_ANY);
+        if (ret != 0) {
+            cerr << "bpf_map_update_elem Errno: " << -ret << endl;
+            exit(EXIT_FAILURE);
+        }
     }
 
-    void stateCheck() {
+    void stateCheck() const {
         assert(xskFD != -1);
         assert(socket != nullptr);
     }
+
+
+    static int lookupBPFMap(int prog_fd) {
+        u32 prog_len = sizeof(struct bpf_prog_info);
+        u32 map_len = sizeof(struct bpf_map_info);
+
+        int xsks_map_fd = -ENOENT;
+        bpf_map_info map_info{};
+
+        bpf_prog_info prog_info{};
+        int err = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_len);
+        if (err)
+            return err;
+
+        const u32 num_maps = prog_info.nr_map_ids;
+        u32 map_ids[num_maps];
+
+
+        memset(&prog_info, 0, prog_len);
+        prog_info.nr_map_ids = num_maps;
+        prog_info.map_ids = reinterpret_cast<u64>(map_ids);
+
+        err = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_len);
+        if (err) {
+            return err;
+        }
+
+        for (u32 i = 0; i < prog_info.nr_map_ids; i++) {
+            const int fd = bpf_map_get_fd_by_id(map_ids[i]);
+            if (fd < 0)
+                continue;
+
+            memset(&map_info, 0, map_len);
+            err = bpf_obj_get_info_by_fd(fd, &map_info, &map_len);
+            if (err) {
+                close(fd);
+                continue;
+            }
+
+            if (!strncmp(map_info.name, "mdRedirMap", sizeof(map_info.name)) &&
+                map_info.key_size == 4 && map_info.value_size == 4) {
+                xsks_map_fd = fd;
+                break;
+            }
+
+            close(fd);
+        }
+
+        return xsks_map_fd;
+    }
 };
 
+
 struct RecvRes {
-    u8 * readAddr;
+    u8* readAddr;
     ssize_t len;
     const xdp_desc* readDesc;
 };
+
 
 class XDPIO {
     XSKQueues qs;
@@ -122,13 +197,27 @@ class XDPIO {
     XSKSocket socket;
 
 public:
-    explicit XDPIO(const std::string& iface): qs{}, umem{qs}, socket{umem, qs, iface} {
+    explicit XDPIO(const std::string& iface, const std::string& xdpProgPinPath): qs{}, umem{qs}, socket{umem, qs, iface, xdpProgPinPath} {
         const rlimit r = {RLIM_INFINITY, RLIM_INFINITY};
         if (setrlimit(RLIMIT_MEMLOCK, &r)) {
             cerr << "ERROR: setrlimit(RLIMIT_MEMLOCK): " << errno << endl;
             exit(EXIT_FAILURE);
         }
         setlocale(LC_ALL, "");
+
+        qs.stateCheck();
+        u32 idx = 0;
+        const u32 prodReserveRes = xsk_ring_prod__reserve(&qs.fillQ, XSKQueues::NUM_FILL_DESC, &idx);
+        if (prodReserveRes != XSKQueues::NUM_FILL_DESC) {
+            cerr << "Fill ring reserve: " << -prodReserveRes << endl;
+            exit(EXIT_FAILURE);
+        }
+        assert(idx == 0);
+
+        for (int i = 0; i < prodReserveRes; i++) {
+            *xsk_ring_prod__fill_addr(&qs.fillQ, idx++) = i * XSKUmem::FRAME_SIZE;
+        }
+        xsk_ring_prod__submit(&qs.fillQ, XSKQueues::NUM_FILL_DESC);
     }
 
     RecvRes recvBlocking() {
@@ -139,27 +228,28 @@ public:
         // if we get multiple out of order packets then we should process them smartly - last to first.
         u32 available;
         u32 idx;
-        while ((available = xsk_ring_cons__peek(&qs.rxQ, XSKQueues::NUM_READ_DESC, &idx)) == 0) {}
+        while ((available = xsk_ring_cons__peek(&qs.rxQ, XSKQueues::NUM_READ_DESC, &idx)) == 0) {
+        }
         assert(available == 1);
         assert(xsk_cons_nb_avail(&qs.rxQ, XSKQueues::NUM_READ_DESC) == 0);
-        assert(xsk_prod_nb_free(&qs.fillQ, XSKQueues::NUM_FILL_DESC) == XSKQueues::NUM_FILL_DESC);
+        assert(xsk_prod_nb_free(&qs.fillQ, XSKQueues::NUM_FILL_DESC) == 1);
         assert(idx < XSKQueues::NUM_READ_DESC);
 
 
         const xdp_desc* readDesc = xsk_ring_cons__rx_desc(&qs.rxQ, idx);
-        __u64 addr = readDesc->addr;
-        __u32 len = readDesc->len;
-        __u32 options = readDesc->options;
+        const __u64 addr = readDesc->addr;
+        const __u32 len = readDesc->len;
+        const __u32 options = readDesc->options;
 
         assert(xsk_umem__extract_addr(addr) == addr);
         assert(xsk_umem__extract_offset(addr) == 0);
         assert(options == 0);
-        assert(u64(umem.buffer) & 4095 == 0);
-        assert((addr & 255) == 0 && ((addr - 255) & (umem.FRAME_SIZE - 1)) == 0);
+        assert((u64(umem.buffer) & 4095) == 0);
+        assert((addr & 255) == 0 && ((addr - 256) & (umem.FRAME_SIZE - 1)) == 0);
         assert(addr < umem.FRAME_SIZE * (umem.NUM_FRAMES - 1));
         assert(len < umem.FRAME_SIZE);
 
-        u8* readAddr = static_cast<u8*>(xsk_umem__get_data(umem.buffer, addr));
+        u8* readAddr = static_cast<u8 *>(xsk_umem__get_data(umem.buffer, addr));
 
         assert(readAddr == umem.buffer + addr);
 
@@ -167,12 +257,12 @@ public:
     }
 
     void completeRead(const xdp_desc* readDesc) {
-        if(readDesc != nullptr) {
+        if (readDesc != nullptr) {
             xsk_ring_cons__release(&qs.rxQ, 1);
 
             assert(!xsk_ring_prod__needs_wakeup(&qs.fillQ));
             u32 idx;
-            u32 reserved = xsk_ring_prod__reserve(&qs.fillQ, 1, &idx);
+            const u32 reserved = xsk_ring_prod__reserve(&qs.fillQ, 1, &idx);
             assert(idx >= 0 && idx < XSKQueues::NUM_FILL_DESC);
             assert(reserved == 1);
 
@@ -180,7 +270,7 @@ public:
             xsk_ring_prod__submit(&qs.fillQ, 1);
         } else {
 #ifndef STRAT_XDP_FOR_XMIT
-        assert(false);
+            assert(false);
 #endif
         }
     }

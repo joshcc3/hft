@@ -284,12 +284,12 @@ public:
 
             char *buf = buffers.get() + bufferIx * BUFFER_SIZE;
             int bytesRead = returnCode;
-            u32 numMessages = bytesRead / sizeof(Order);
-            assert(bytesRead % sizeof(Order) == 0);
+            u32 numMessages = bytesRead / sizeof(OrderPacket);
+            assert(bytesRead % sizeof(OrderPacket) == 0);
             assert(bytesRead <= BUFFER_SIZE);
 
             char *endBuf = handleMessages(buf, numMessages, curLabResult, curTime);
-            assert(endBuf == buf + sizeof(Order) * numMessages);
+            assert(endBuf == buf + sizeof(OrderPacket) * numMessages);
 
             used.set(bufferIx);
             assert(!isAlive || curLabResult.seenOrders.size() > ogLabResSize);
@@ -319,7 +319,7 @@ private:
     char *handleMessages(char *buf, u32 n, LabResult &lab, TimeNs curTime) {
         for (int i = 0; i < n; ++i) {
 
-            const auto *o = reinterpret_cast<Order *>(buf);
+            const auto *o = reinterpret_cast<OrderPacket *>(buf);
             auto timeNow = currentTimeNs();
             OrderId orderId = o->id;
             TimeNs triggerSubmitTime = md.eventTime(o->triggerEvent);
@@ -337,7 +337,7 @@ private:
             assert(o->qty > 0);
 
             lab.seenOrders.emplace_back(*o, curTime, triggerSubmitTime);
-            buf += sizeof(Order);
+            buf += sizeof(OrderPacket);
         }
 
         return buf;

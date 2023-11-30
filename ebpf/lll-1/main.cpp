@@ -291,21 +291,21 @@ public:
         // assert(!IS_ERR_OR_NULL(xdp_prog.program));
         cout << "XSK Socket FD " << xskFD << endl;
 
-        // int programFD = xdp_program__fd(xdp_prog.program);
-        // int xsks_map = lookup_bpf_map(programFD);
-        // if (xsks_map < 0) {
-            // fprintf(stderr, "ERROR: no xsks map found: %s\n",
-                    // strerror(xsks_map));
-            // exit(EXIT_FAILURE);
-        // }
+        int programFD = xdp_program__fd(xdp_prog.program);
+        int xsks_map = lookup_bpf_map(programFD);
+        if (xsks_map < 0) {
+            fprintf(stderr, "ERROR: no xsks map found: %s\n",
+                    strerror(xsks_map));
+            exit(EXIT_FAILURE);
+        }
 
-        // int key = 0;
-        // int fd = xskFD;
-        // ret = bpf_map_update_elem(xsks_map, &key, &fd, BPF_ANY);
-        // if (ret != 0) {
-            // cerr << "bpf_map_update_elem Errno: " << -ret << endl;
-            // exit(EXIT_FAILURE);
-        // }
+        int key = 0;
+        int fd = xskFD;
+        ret = bpf_map_update_elem(xsks_map, &key, &fd, BPF_ANY);
+        if (ret != 0) {
+            cerr << "bpf_map_update_elem Errno: " << -ret << endl;
+            exit(EXIT_FAILURE);
+        }
 
         assert(xskFD > 2);
         int sock_opt = 1;

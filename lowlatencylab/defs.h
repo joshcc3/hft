@@ -87,7 +87,9 @@ struct OrderFlags {
     bool isBid: 1;
 };
 
-struct Order {
+struct OrderPacket {
+    u8 packetType{2};
+    u8 _padding[5]{};
     TimeNs submittedTime = 0;
     MDMsgId triggerEvent = 0;
     TimeNs triggerReceivedTime = 0;
@@ -96,9 +98,9 @@ struct Order {
     Qty qty = 0;
     OrderFlags flags{};
 
-    Order() = default;
+    OrderPacket() = default;
 
-    Order(TimeNs submittedTime, MDMsgId triggerEvent, TimeNs triggerReceivedTime, OrderId id, PriceL price, Qty qty,
+    OrderPacket(TimeNs submittedTime, MDMsgId triggerEvent, TimeNs triggerReceivedTime, OrderId id, PriceL price, Qty qty,
           OrderFlags flags
     ) : submittedTime{submittedTime},
         triggerEvent{triggerEvent},
@@ -110,12 +112,12 @@ struct Order {
 };
 
 struct OrderInfo {
-    Order orderInfo;
+    OrderPacket orderInfo;
 
     TimeNs receivedTime = 0;
     TimeNs triggerSubmitTime = 0;
 
-    OrderInfo(const Order &o, TimeNs r, TimeNs t) : orderInfo{o}, receivedTime{r}, triggerSubmitTime{t} {}
+    OrderInfo(const OrderPacket &o, TimeNs r, TimeNs t) : orderInfo{o}, receivedTime{r}, triggerSubmitTime{t} {}
 };
 
 
@@ -201,16 +203,17 @@ struct MDFlags {
 };
 
 struct MDPacket {
+    u8 packetType{1};
+    char _padding[5];
     SeqNo seqNo = -1;
     TimeNs localTimestamp = 0;
     PriceL price = 0;
     Qty qty = 0;
     MDFlags flags{.isTerm = true};
-    char _padding[7]{};
 
     MDPacket() = default;
 
-    MDPacket(SeqNo seqNo, TimeNs localTimestamp, PriceL price, Qty qty, MDFlags flags) : seqNo{seqNo},
+    MDPacket(SeqNo seqNo, TimeNs localTimestamp, PriceL price, Qty qty, MDFlags flags) : packetType{1}, seqNo{seqNo},
                                                                                          localTimestamp{localTimestamp},
                                                                                          price{price}, qty{qty},
                                                                                          flags{flags}, _padding{} {}
@@ -242,8 +245,7 @@ inline constexpr int OE_PORT = 9012;
 inline std::string MCAST_ADDR = "239.255.0.1";
 inline constexpr int MCAST_PORT = 12345;
 
-//inline std::string MD_UNICAST_ADDR = "192.168.100.2"; // "192.168.100.2";
-inline std::string MD_UNICAST_ADDR = "192.168.100.1"; // "192.168.100.2";
+inline std::string MD_UNICAST_HOSTNAME = "lll-1.md.client";
 inline constexpr uint16_t MD_UNICAST_PORT = 4321;
 
 inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 500'000'000;

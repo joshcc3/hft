@@ -38,9 +38,9 @@ public:
 
     sockaddr_in serverAddr{};
 
-    static constexpr size_t msgSize = sizeof(Order);
+    static constexpr size_t msgSize = sizeof(OrderPacket);
     char outputBuf[msgSize]{};
-    Order curOrder;
+    OrderPacket curOrder;
 
     explicit OE(IOUringState& ioState, const std::string& oeHost) : ioState{ioState} {
         const addrinfo hints{
@@ -93,7 +93,7 @@ public:
             cerr << "Could not create oe server [" << errno << "]" << endl;
             exit(EXIT_FAILURE);
         }
-        assert(clientFD == 5); // assume that this is the second socket opened
+        assert(clientFD == 7); // assume that this is the second socket opened
 
         int enable = 1;
         if (setsockopt(clientFD, SOL_SOCKET, SO_DONTROUTE, &enable, sizeof(enable)) < 0) {
@@ -165,7 +165,8 @@ public:
         TimeNs submitTime = currentTimeNs();
 
 
-        Order& o = *reinterpret_cast<Order *>(outputBuf);
+        OrderPacket& o = *reinterpret_cast<OrderPacket *>(outputBuf);
+        o.packetType = 2;
         o.submittedTime = submitTime;
         o.triggerEvent = triggerEvent;
         o.triggerReceivedTime = triggerRecvTime;

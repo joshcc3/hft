@@ -5,6 +5,7 @@
 #ifndef LLL_EXCHANGE_MDSERVER_H
 #define LLL_EXCHANGE_MDSERVER_H
 
+#include <netdb.h>
 #include <bitset>
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/iostreams/filtering_streambuf.hpp>
@@ -26,6 +27,8 @@
 #include <iostream>
 #include <unordered_map>
 #include <memory>
+#include <linux/udp.h>
+
 #include "OEServer.h"
 #include "../defs.h"
 
@@ -61,7 +64,7 @@ public:
 
     std::unordered_map<MDMsgId, TimeNs> eventTimeMp;
 
-    MDServer(IOUringState &ioState, std::ifstream &ifile, std::string headerLine) :
+    MDServer(IOUringState &ioState, const std::string& mdClient, std::ifstream &ifile, std::string headerLine) :
             headerLine{std::move(headerLine)},
             ioState{ioState},
             ifile{ifile},
@@ -91,11 +94,34 @@ public:
         }
 //        assert(bufSize == 2 * SND_BUF_SZ);
 
+        const addrinfo hints{
+            .ai_family = AF_INET,
+            .ai_socktype = SOCK_STREAM
+        };
 
-        // Set up the sockaddr structure
-        unicast_addr.sin_family = AF_INET;
-        unicast_addr.sin_addr.s_addr = inet_addr(MD_UNICAST_ADDR.c_str());
+        addrinfo* res{};
+
+        int status;
+        if ((status = getaddrinfo(mdClient.c_str(), nullptr, &hints, &res)) != 0) {
+            std::cerr << "getaddrinfo: " << gai_strerror(status) << std::endl;
+            return;
+        }
+
+        assert(res->ai_next == nullptr);
+        assert(res != nullptr);
+        assert(res->ai_family == AF_INET);
+
+        unicast_addr = *(sockaddr_in *) res->ai_addr;
+        assert(unicast_addr.sin_family == AF_INET);
+
+        void* addr = &(unicast_addr.sin_addr);
+        char ipstr[16];
+        inet_ntop(res->ai_family, addr, ipstr, sizeof ipstr);
+        std::cout << "MD Server: " << ipstr << std::endl;
+
         unicast_addr.sin_port = htons(MD_UNICAST_PORT);
+
+        freeaddrinfo(res); // free the linked list
 
         reset();
 
@@ -119,6 +145,7 @@ public:
         isBid = side == BUY;
 
         MDPacket &packet = *reinterpret_cast<MDPacket *>(bufPos);
+        packet.packetType = 1;
         packet.seqNo = cursor;
         packet.localTimestamp = timeNow;
         packet.price = price;

@@ -30,7 +30,7 @@ class Driver {
     IOUringState ioState{};
     int fileTable[1]{};
 
-    XDPIO io{"lo"};
+    XDPIO io{"lo", "/sys/fs/bpf/strat"};
     L2OB ob{};
     OE oe{ioState, "lll-1.oe"};
     Strat strat{oe, ob, io};
