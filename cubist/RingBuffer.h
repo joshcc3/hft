@@ -30,7 +30,6 @@ public:
     static_assert(Capacity > 0, "Capacity must be positive.");
 
     [[nodiscard]] bool empty() const noexcept {
-        assert((head == tail) == (_size == Capacity));
         return head == tail;
     }
 

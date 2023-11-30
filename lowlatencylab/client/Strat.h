@@ -7,12 +7,9 @@
 
 
 #include <cstring>
-#include <unistd.h>
-#include <cstdio>
 #include <sched.h>
 #include <new>
 #include <cassert>
-#include <netinet/in.h>
 #include "OE.h"
 #include "../defs.h"
 #include "L2OB.h"
@@ -30,7 +27,7 @@ public:
     L2OB& ob;
     OE& orderEntry;
 
-    UDPBuffer<PacketProcessor<Strat>> udpBuf{};
+    UDPBuffer<PacketProcessor> udpBuf{};
     SeqNo cursor = 0;
     TimeNs lastReceivedNs = 0;
     SeqNo lastReceivedSeqNo = -1;
@@ -48,9 +45,9 @@ public:
                Qty qty) {
         const auto& [bestBid, bestAsk, bidSize, askSize] = ob.update(isSnapshot, side, localTimestamp, price, qty);
         if (!isSnapshot) {
-            SeqNo triggerEvent = seqNo;
-            TimeNs recvTime = mdTime;
-            Qty tradeQty = 1;
+            const SeqNo triggerEvent = seqNo;
+            const TimeNs recvTime = mdTime;
+            const Qty tradeQty = 1;
 
             PriceL sidePrice;
             PriceL oppSidePrice;
@@ -69,18 +66,18 @@ public:
                 throw std::runtime_error("Unexpected");
             }
 
-            PriceL notionalChange = price * qty - sidePrice * sideQty;
+            const PriceL notionalChange = price * qty - sidePrice * sideQty;
 
             if (bidSize != -1 && askSize != -1) {
                 if (notionalChange > TRADE_THRESHOLD) {
-                    PriceL tradePrice = oppSidePrice;
-                    OrderFlags flags{.isBid = !isBid};
+                    const PriceL tradePrice = oppSidePrice;
+                    const OrderFlags flags{.isBid = !isBid};
                     CLOCK(ORDER_SUBMISSION_PC,
                           orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
                     )
                 } else if (notionalChange < -TRADE_THRESHOLD) {
-                    PriceL tradePrice = sidePrice;
-                    OrderFlags flags{.isBid = isBid};
+                    const PriceL tradePrice = sidePrice;
+                    const OrderFlags flags{.isBid = isBid};
                     CLOCK(ORDER_SUBMISSION_PC,
                           orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
                     )
@@ -96,21 +93,25 @@ public:
         assert(time > 0);
         assert(time > lastReceivedNs);
 
+        static int counter = 0;
+        ++counter;
+
         UDPBuffer<Strat>::MaskType ogMask = udpBuf.mask;
-        u32 ogLowestSeqNum = udpBuf.nextMissingSeqNo;
-        u32 ogHead = udpBuf.head;
-        OrderId ogCurOrder = orderEntry.curOrder.id;
+        const u32 ogLowestSeqNum = udpBuf.nextMissingSeqNo;
+        const u32 ogHead = udpBuf.head;
+        const OrderId ogCurOrder = orderEntry.curOrder.id;
 
         const u8* finalBufPos = inBuf;
 
         for (int i = 0; i < numPackets; ++i) {
             const MDPacket& packet = *reinterpret_cast<const MDPacket *>(finalBufPos);
-            TimeNs timeDelay = currentTimeNs() - packet.localTimestamp;
-            assert(timeDelay <= 5'000'000'000);
+            const TimeNs timeDelay = currentTimeNs() - packet.localTimestamp;
+            // assert(timeDelay <= 5'000'000'000);
+            assert(packet.packetType == MD_PACKET_TYPE);
             assert(packet.seqNo >= 0 || packet.flags.isTerm);
             assert(packet.price > 0);
             assert(packet.qty >= 0);
-            int processed = udpBuf.newMessage(time, packet, *this);
+            const int processed = udpBuf.newMessage(time, packet, *this);
             assert(orderEntry.curOrder.id == ogCurOrder || processed > 0);
             finalBufPos += sizeof(MDPacket);
         }
@@ -131,12 +132,12 @@ public:
             assert(p.price > 0);
             assert(p.qty >= 0);
 
-            SeqNo seqNo = p.seqNo;
-            TimeNs timestamp = p.localTimestamp;
-            TimeNs localTimestamp = timestamp;
-            PriceL price = p.price;
-            Qty qty = p.qty;
-            bool isSnapshot = p.flags.isSnapshot;
+            const SeqNo seqNo = p.seqNo;
+            const TimeNs timestamp = p.localTimestamp;
+            const TimeNs localTimestamp = timestamp;
+            const PriceL price = p.price;
+            const Qty qty = p.qty;
+            const bool isSnapshot = p.flags.isSnapshot;
 
             if (qty > 0) {
                 static bool isSnapshotting = false;
@@ -145,9 +146,9 @@ public:
                 }
                 isSnapshotting = isSnapshot;
                 if (p.flags.isBid) {
-                    checkTrade<Side::BUY>(seqNo, time, isSnapshot, localTimestamp, price, qty);
+                    checkTrade<BUY>(seqNo, time, isSnapshot, localTimestamp, price, qty);
                 } else {
-                    checkTrade<Side::SELL>(seqNo, time, isSnapshot, localTimestamp, price, qty);
+                    checkTrade<SELL>(seqNo, time, isSnapshot, localTimestamp, price, qty);
                 }
             } else {
                 CLOCK(BOOK_UPDATE_PC,
@@ -161,35 +162,50 @@ public:
     }
 
     void recvUdpMD() {
-        auto curTime = currentTimeNs();
+        const auto curTime = currentTimeNs();
 
         assert(!udpBuf.test(0));
         assert(orderEntry.isConnected());
 
-        UDPBuffer<Strat>::MaskType ogMask = udpBuf.mask;
-        SeqNo ogSeqNo = udpBuf.nextMissingSeqNo;
-        SeqNo ogCursor = cursor;
+        const UDPBuffer<Strat>::MaskType ogMask = udpBuf.mask;
+        const SeqNo ogSeqNo = udpBuf.nextMissingSeqNo;
+        const SeqNo ogCursor = cursor;
 
-        bool isAlive = isConnected();
+        const bool isAlive = isConnected();
 
         if (__builtin_expect(isAlive, true)) {
-            const auto& [inBuf, bytesRead, readDesc] = io.recvBlocking();
+            const auto& [inBuf, bytesReadWithPhy, readDesc] = io.recvBlocking();
             assert(inBuf != nullptr);
             // CLOCK(SYS_RECV_PC,
             // )
-            assert(bytesRead > 0);
-            assert(bytesRead <= READ_BUF_SZ);
+            assert(bytesReadWithPhy > 0);
+            assert(bytesReadWithPhy <= READ_BUF_SZ);
 
-            u64 numPackets = bytesRead / sizeof(MDPacket);
+            assert((reinterpret_cast<u64>(inBuf) & 127) == 0);
+            const MDFrame* packet = reinterpret_cast<MDFrame *>(inBuf);
+            assert(packet->eth.h_proto == htons(ETH_P_IP));
+            assert(packet->ip.version == 4);
+            assert(packet->ip.ihl == 5);
+            assert(htons(packet->ip.tot_len) == bytesReadWithPhy - sizeof(ethhdr));
+            assert((htons(packet->ip.tot_len) - sizeof(iphdr) - sizeof(udphdr)) % sizeof(MDPacket) == 0);
+            //assert((packet->ip.frag_off & 0x1fff) == 0);
+            assert(((packet->ip.frag_off >> 13) & 1) == 0);
+            assert(((packet->ip.frag_off >> 15) & 1) == 0);
+            assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
+
+            const u8* dataBuf = inBuf + sizeof(MDFrame);
+            u32 bytesRead = bytesReadWithPhy - sizeof(MDFrame);
+
+            const u64 numPackets = bytesRead / sizeof(MDPacket);
             assert(bytesRead % sizeof(MDPacket) == 0);
 
-            assert(checkMessageDigest(inBuf, bytesRead));
+            assert(checkMessageDigest(dataBuf, bytesRead));
 
-            const u8* endBuf = handleMessages(inBuf, numPackets, curTime);
-            assert(endBuf == inBuf + sizeof(MDPacket) * numPackets);
+            const u8* endBuf = handleMessages(dataBuf, numPackets, curTime);
+            assert(endBuf == dataBuf + sizeof(MDPacket) * numPackets);
 
 
-            TimeNs now = currentTimeNs();
+            const TimeNs now = currentTimeNs();
             assert(lastReceivedNs == 0 || now - lastReceivedNs < 100'000'000);
             lastReceivedNs = now;
             io.completeRead(readDesc);

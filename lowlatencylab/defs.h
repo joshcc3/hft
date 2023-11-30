@@ -21,8 +21,11 @@
 #include <cassert>
 #include <iostream>
 #include <unordered_map>
+#include <linux/if_ether.h>
+#include <linux/udp.h>
+#include <netinet/ip.h>
 
-// #define NDEBUG
+#define NDEBUG
 
 #ifdef NDEBUG
 #undef assert
@@ -66,6 +69,8 @@ using MDMsgId = SeqNo;
 using TimeNs = i64;
 
 constexpr static int PINNED_CPU = 0;
+constexpr static int MD_PACKET_TYPE = 1;
+constexpr static int OE_PACKET_TYPE = 2;
 
 inline u64 __attribute__((always_inline)) rotl(u64 a, u32 n) {
     return (a << n) | (a >> (64 - n));
@@ -88,7 +93,7 @@ struct OrderFlags {
 };
 
 struct OrderPacket {
-    u8 packetType{2};
+    u8 packetType{OE_PACKET_TYPE};
     u8 _padding[5]{};
     TimeNs submittedTime = 0;
     MDMsgId triggerEvent = 0;
@@ -203,7 +208,8 @@ struct MDFlags {
 };
 
 struct MDPacket {
-    u8 packetType{1};
+    static_assert(sizeof(MDFlags) == 1);
+    u8 packetType{MD_PACKET_TYPE};
     char _padding[5];
     SeqNo seqNo = -1;
     TimeNs localTimestamp = 0;
@@ -213,7 +219,7 @@ struct MDPacket {
 
     MDPacket() = default;
 
-    MDPacket(SeqNo seqNo, TimeNs localTimestamp, PriceL price, Qty qty, MDFlags flags) : packetType{1}, seqNo{seqNo},
+    MDPacket(SeqNo seqNo, TimeNs localTimestamp, PriceL price, Qty qty, MDFlags flags) : seqNo{seqNo},
                                                                                          localTimestamp{localTimestamp},
                                                                                          price{price}, qty{qty},
                                                                                          flags{flags}, _padding{} {}
@@ -221,6 +227,12 @@ struct MDPacket {
     MDPacket(const MDPacket &other) = default;
 
 };
+
+struct MDFrame {
+    ethhdr eth;
+    iphdr ip;
+    udphdr udp;
+} __attribute__((packed));
 
 inline bool operator==(const IOUringState &s1, const IOUringState &s2) {
     return &s1 == &s2;
@@ -322,7 +334,7 @@ inline bool checkMessageDigest(const u8 *buf, ssize_t bytes) {
     const MDPacket &p = *reinterpret_cast<const MDPacket *>(buf);
 
     const auto &[e, inserted] = seenHashes.emplace(p.seqNo, p);
-    assert(false);
+
     assert(inserted);
     return true;
 }

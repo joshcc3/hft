@@ -228,13 +228,11 @@ public:
         // if we get multiple out of order packets then we should process them smartly - last to first.
         u32 available;
         u32 idx;
-        while ((available = xsk_ring_cons__peek(&qs.rxQ, XSKQueues::NUM_READ_DESC, &idx)) == 0) {
+        while ((available = xsk_ring_cons__peek(&qs.rxQ, 1, &idx)) == 0) {
         }
         assert(available == 1);
-        assert(xsk_cons_nb_avail(&qs.rxQ, XSKQueues::NUM_READ_DESC) == 0);
-        assert(xsk_prod_nb_free(&qs.fillQ, XSKQueues::NUM_FILL_DESC) == 1);
+        assert(xsk_prod_nb_free(&qs.fillQ, XSKQueues::NUM_FILL_DESC) == xsk_cons_nb_avail(&qs.rxQ, XSKQueues::NUM_READ_DESC) + 1);
         assert(idx < XSKQueues::NUM_READ_DESC);
-
 
         const xdp_desc* readDesc = xsk_ring_cons__rx_desc(&qs.rxQ, idx);
         const __u64 addr = readDesc->addr;
@@ -258,15 +256,17 @@ public:
 
     void completeRead(const xdp_desc* readDesc) {
         if (readDesc != nullptr) {
+            u32 idx = *qs.rxQ.consumer & qs.rxQ.mask;
             xsk_ring_cons__release(&qs.rxQ, 1);
 
             assert(!xsk_ring_prod__needs_wakeup(&qs.fillQ));
-            u32 idx;
             const u32 reserved = xsk_ring_prod__reserve(&qs.fillQ, 1, &idx);
-            assert(idx >= 0 && idx < XSKQueues::NUM_FILL_DESC);
+            assert(idx >= 0 && idx < XSKQueues::NUM_FILL_DESC * 2);
             assert(reserved == 1);
 
-            *xsk_ring_prod__fill_addr(&qs.fillQ, idx) = readDesc->addr;
+            unsigned long long* fillQEntry = xsk_ring_prod__fill_addr(&qs.fillQ, idx);
+            assert(fillQEntry != nullptr);
+            *fillQEntry = readDesc->addr;
             xsk_ring_prod__submit(&qs.fillQ, 1);
         } else {
 #ifndef STRAT_XDP_FOR_XMIT

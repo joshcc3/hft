@@ -47,7 +47,7 @@ struct UDPBuffer {
     using MaskType = u64;
     constexpr static int Sz = 64;
     constexpr static int UNPROCESSED_SZ = (1 << 12);
-    constexpr static MaskType ONES = ~MaskType(0);
+    constexpr static MaskType ONES = ~static_cast<MaskType>(0);
     static_assert(__builtin_popcount(Sz) == 1);
     static_assert(Sz == 64);
     static_assert(ONES == 0xFFFFFFFFFFFFFFFF);
@@ -61,7 +61,7 @@ struct UDPBuffer {
 
     [[nodiscard]] bool stateCheck() const {
         assert(head >= 0 && head < Sz);
-        assert((mask & (MaskType(1) << head)) == 0);
+        assert((mask & (static_cast<MaskType>(1) << head)) == 0);
         assert(nextMissingSeqNo >= 0);
         assert(unprocessed.empty() || nextMissingSeqNo < unprocessed.get(0).seqNo);
         for (int i = 0; i < Sz; ++i) {
@@ -96,7 +96,6 @@ struct UDPBuffer {
 
     int newMessage(TimeNs time, const MDPacket &msg, PP &packetProcessor) {
         SeqNo seqNo = msg.seqNo;
-
         assert(stateCheck());
         assert(head < Sz);
         assert(nextMissingSeqNo >= 0);
@@ -117,14 +116,14 @@ struct UDPBuffer {
 
             if (seqNo == nextMissingSeqNo) {
 
-                CLOCK(MSG_HANDLING_PC,
+                // CLOCK(MSG_HANDLING_PC,
                         int maxFull = 1;
                         MaskType alignedMask = rotr(mask, head);
                         assert(rotl(alignedMask, head) == mask);
                         assert(alignedMask & 1);
                         for (MaskType fullMask = 1;
                              maxFull < Sz && (fullMask & alignedMask) == fullMask;
-                             ++maxFull, fullMask = nOnes(maxFull));
+                             ++maxFull, fullMask = (fullMask << 1) | 1);
                         int packetsToProcess = maxFull - 1;
                         for (int j = 0; j < packetsToProcess; ++j) {
                             const MDPacket &p = get(j);
@@ -138,7 +137,7 @@ struct UDPBuffer {
                             unprocessed.pop();
                             totalPacketsProccessed += newMessage(time, p, packetProcessor);
                         }
-                )
+                // )
 
             } else {
                 totalPacketsProccessed = 0;
@@ -166,6 +165,7 @@ struct UDPBuffer {
         MaskType alignedMask = rotr(mask, head);
         assert(rotl(alignedMask, head) == mask);
         MaskType fullMask = nOnes(n);
+        assert(__builtin_popcount(fullMask) == n);
         assert((fullMask & alignedMask) == fullMask);
         MaskType updatedAlignedMask = alignedMask & ~fullMask;
         mask = rotl(updatedAlignedMask, head);
