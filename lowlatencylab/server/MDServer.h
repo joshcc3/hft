@@ -145,7 +145,7 @@ public:
         isBid = side == BUY;
 
         MDPacket &packet = *reinterpret_cast<MDPacket *>(bufPos);
-        packet.packetType = 1;
+        packet.packetType = MD_PACKET_TYPE;
         packet.seqNo = cursor;
         packet.localTimestamp = timeNow;
         packet.price = price;

@@ -38,9 +38,9 @@ public:
 
     sockaddr_in serverAddr{};
 
-    static constexpr size_t msgSize = sizeof(OrderPacket);
+    static constexpr size_t msgSize = sizeof(Order);
     char outputBuf[msgSize]{};
-    OrderPacket curOrder;
+    Order curOrder;
 
     explicit OE(IOUringState& ioState, const std::string& oeHost) : ioState{ioState} {
         const addrinfo hints{
@@ -165,7 +165,7 @@ public:
         TimeNs submitTime = currentTimeNs();
 
 
-        OrderPacket& o = *reinterpret_cast<OrderPacket *>(outputBuf);
+        Order& o = *reinterpret_cast<Order *>(outputBuf);
         o.packetType = 2;
         o.submittedTime = submitTime;
         o.triggerEvent = triggerEvent;

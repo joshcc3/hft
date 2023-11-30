@@ -74,7 +74,7 @@ public:
                     CLOCK(TOT_RECV_PC,
                             strat.recvUdpMD();
                     )
-                    int modulus = 0x1f;
+                    int modulus = 0x1fff;
                     if(__builtin_expect((++counter1 & modulus) == 0, false)) {
 //                    if((++counter1 & modulus) == 0) {
                         TimeNs cTime = currentTimeNs();
@@ -91,6 +91,30 @@ public:
                         prevCheckpoint = cTime;
                     }
 //                    assert(std::abs(currentTimeNs() - strat.lastReceivedNs) < 10'000'000);
+
+                    if (u32 ready = io_uring_cq_ready(&ioState.ring)) {
+                        unsigned head;
+                        unsigned processed = 0;
+                        struct io_uring_cqe *cqe;
+                        io_uring_for_each_cqe(&ioState.ring, head, cqe) {
+                            assert(nullptr != cqe);
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "NullDereference"
+                            io_uring_cqe &e = *cqe;
+#pragma clang diagnostic pop
+                            u64 userData = io_uring_cqe_get_data64(&e);
+                            if (userData >= OE::ORDER_TAG) {
+                                oe.completeMessage(e);
+                            } else {
+                                cerr << "Unexpected userdata [" << userData << "]";
+                                throw std::runtime_error("Unexpected");
+                                assert(false);
+                            }
+                            ++processed;
+                        }
+                        assert(processed >= ready);
+                        io_uring_cq_advance(&ioState.ring, processed);
+                    }
 
                     assert(strat.isConnected() || !strat.isComplete);
                     break;

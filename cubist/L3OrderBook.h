@@ -21,7 +21,7 @@
 #include "L3LevelAlloc.h"
 
 
-struct OrderPacket {
+struct Order {
     PriceL priceL;
     Qty size;
     OrderId orderId;
@@ -30,7 +30,7 @@ struct OrderPacket {
     TimeNs timeNs;
 
 
-    OrderPacket(TimeNs timeNs, bool isStrategy, OrderId orderId, Side side, Qty size, PriceL price) : isStrategy{isStrategy},
+    Order(TimeNs timeNs, bool isStrategy, OrderId orderId, Side side, Qty size, PriceL price) : isStrategy{isStrategy},
                                                                                                 orderId{orderId},
                                                                                                 side{side},
                                                                                                 size{size},
@@ -47,7 +47,7 @@ struct OrderPacket {
 class L3Vec {
 
 public:
-    using OrderPair = std::pair<OrderId, OrderPacket>;
+    using OrderPair = std::pair<OrderId, Order>;
     using OrderMap = std::vector<OrderPair>;
     using const_iterator = OrderMap::const_iterator;
     using iterator = OrderMap::iterator;
@@ -100,7 +100,7 @@ public:
         assert(false);
     }
 
-    iterator emplace(OrderId orderId, OrderPacket order) {
+    iterator emplace(OrderId orderId, Order order) {
         assert(!orders.empty());
         assert(find_if(orders.begin(), orders.end(), [orderId](const auto &p) { return p.first == orderId; }) ==
                orders.end());
@@ -120,7 +120,7 @@ public:
         assert(stateChecks());
     }
 
-    const pair<OrderId, OrderPacket> &requeue(iterator &iter, Qty newSize) {
+    const pair<OrderId, Order> &requeue(iterator &iter, Qty newSize) {
         assert(iter->second.size < newSize);
         levelSize += newSize - iter->second.size;
         if (orders.size() == 1) {
@@ -129,7 +129,7 @@ public:
             return *iter;
         } else {
             // TODO - remove this
-            const OrderPacket o = iter->second;
+            const Order o = iter->second;
             auto it = orders.begin();
             for (; it != orders.end() && it != iter; ++it);
             assert(it == iter);
@@ -138,7 +138,7 @@ public:
         }
     }
 
-    void __attribute__ ((always_inline)) reduce(OrderPacket &existingOrder, Qty newSize) {
+    void __attribute__ ((always_inline)) reduce(Order &existingOrder, Qty newSize) {
         assert(newSize < existingOrder.size);
         levelSize -= (existingOrder.size - newSize);
         existingOrder.size = newSize;
@@ -200,18 +200,18 @@ private:
 
         bool check = true;
         int sum = std::accumulate(orders.begin(), orders.end(), 0,
-                                  [](int acc, const std::pair<OrderId, OrderPacket> &p) { return acc + p.second.size; });
+                                  [](int acc, const std::pair<OrderId, Order> &p) { return acc + p.second.size; });
         assert(check &= sum == levelSize);
 
         bool samePriceSide = orders.empty() || std::accumulate(orders.begin(), orders.end(), true,
-                                                               [this](bool acc, const std::pair<OrderId, OrderPacket> &p) {
+                                                               [this](bool acc, const std::pair<OrderId, Order> &p) {
                                                                    return acc &&
                                                                           p.second.priceL == orders[0].second.priceL
                                                                           && p.second.side == orders[0].second.side;
                                                                });
         assert(check &= samePriceSide);
         bool sizesPricesValid = orders.empty() || std::accumulate(orders.begin(), orders.end(), true,
-                                                                  [](bool acc, const std::pair<OrderId, OrderPacket> &p) {
+                                                                  [](bool acc, const std::pair<OrderId, Order> &p) {
                                                                       return acc &&
                                                                              p.second.priceL > 0
                                                                              && p.second.size > 0;
@@ -222,7 +222,7 @@ private:
         assert(check &= os.size() == orders.size());
 
         bool orderValid = orders.empty() || std::accumulate(orders.begin(), orders.end(), true,
-                                                            [](bool acc, const std::pair<OrderId, OrderPacket> &p) {
+                                                            [](bool acc, const std::pair<OrderId, Order> &p) {
                                                                 return acc && p.first == p.second.orderId;
                                                             });
         assert(check &= orderValid);
@@ -403,7 +403,7 @@ public:
 
         if (existingIter != orderIdMap.end()) {
             typename L3::iterator orderPos = existingIter->second.getOrder();
-            OrderPacket &existingOrder = orderPos->second;
+            Order &existingOrder = orderPos->second;
             assert(existingOrder.orderId == oldOrderId);
             //            assert(existingOrder.size != newSize); - there can be modifies to the same value.
             if (newPrice != existingOrder.priceL) {
@@ -491,7 +491,7 @@ private:
 
         lastUpdateTs = time;
 
-        const OrderPacket &deletedOrder = orderLocation->second;
+        const Order &deletedOrder = orderLocation->second;
         OrderId deletedOrderId = deletedOrder.orderId;
 
         level->erase(orderLocation);
@@ -544,7 +544,7 @@ private:
 
                 auto insertPos = levels.emplace(iter,
                                                 L3{typename L3::OrderMap{{orderId,
-                                                                          OrderPacket{timeNs, isStrategy, orderId, side, size,
+                                                                          Order{timeNs, isStrategy, orderId, side, size,
                                                                                 priceL}}},
                                                    priceL, side});
 //                auto res = insertPos->find(orderId);
@@ -552,7 +552,7 @@ private:
                 return;
             } else if (priceL == curPrice) {
                 // TODO - this code is replicated above
-                iter->emplace(orderId, OrderPacket{timeNs, isStrategy, orderId, side, size, priceL});
+                iter->emplace(orderId, Order{timeNs, isStrategy, orderId, side, size, priceL});
                 orderIdMap.emplace(orderId, OrderIdLoc<L3>{orderId, side, iter});
                 return;
             }
@@ -563,7 +563,7 @@ private:
         const typename SideLevels<L3>::iterator &insertPos = levels.emplace(iter,
                                                                             L3{typename L3::OrderMap{
                                                                                     {orderId,
-                                                                                     OrderPacket{timeNs, isStrategy, orderId,
+                                                                                     Order{timeNs, isStrategy, orderId,
                                                                                            side, size, priceL}}},
                                                                                priceL,
                                                                                side});

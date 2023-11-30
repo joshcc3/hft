@@ -92,7 +92,7 @@ struct OrderFlags {
     bool isBid: 1;
 };
 
-struct OrderPacket {
+struct Order {
     u8 packetType{OE_PACKET_TYPE};
     u8 _padding[5]{};
     TimeNs submittedTime = 0;
@@ -103,9 +103,9 @@ struct OrderPacket {
     Qty qty = 0;
     OrderFlags flags{};
 
-    OrderPacket() = default;
+    Order() = default;
 
-    OrderPacket(TimeNs submittedTime, MDMsgId triggerEvent, TimeNs triggerReceivedTime, OrderId id, PriceL price, Qty qty,
+    Order(TimeNs submittedTime, MDMsgId triggerEvent, TimeNs triggerReceivedTime, OrderId id, PriceL price, Qty qty,
           OrderFlags flags
     ) : submittedTime{submittedTime},
         triggerEvent{triggerEvent},
@@ -117,12 +117,12 @@ struct OrderPacket {
 };
 
 struct OrderInfo {
-    OrderPacket orderInfo;
+    Order orderInfo;
 
     TimeNs receivedTime = 0;
     TimeNs triggerSubmitTime = 0;
 
-    OrderInfo(const OrderPacket &o, TimeNs r, TimeNs t) : orderInfo{o}, receivedTime{r}, triggerSubmitTime{t} {}
+    OrderInfo(const Order &o, TimeNs r, TimeNs t) : orderInfo{o}, receivedTime{r}, triggerSubmitTime{t} {}
 };
 
 

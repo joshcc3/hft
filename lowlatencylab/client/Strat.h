@@ -174,15 +174,22 @@ public:
         const bool isAlive = isConnected();
 
         if (__builtin_expect(isAlive, true)) {
-            const auto& [inBuf, bytesReadWithPhy, readDesc] = io.recvBlocking();
-            assert(inBuf != nullptr);
-            // CLOCK(SYS_RECV_PC,
-            // )
+            const u8* inBuf;
+            u32 bytesReadWithPhy;
+            const xdp_desc* readDesc;
+
+            CLOCK(SYS_RECV_PC,
+                const auto& res = io.recvBlocking();
+                inBuf = res.readAddr;
+                bytesReadWithPhy = res.len;
+                readDesc = res.readDesc;
+                assert(inBuf != nullptr);
+            )
             assert(bytesReadWithPhy > 0);
             assert(bytesReadWithPhy <= READ_BUF_SZ);
 
             assert((reinterpret_cast<u64>(inBuf) & 127) == 0);
-            const MDFrame* packet = reinterpret_cast<MDFrame *>(inBuf);
+            const MDFrame* packet = reinterpret_cast<const MDFrame *>(inBuf);
             assert(packet->eth.h_proto == htons(ETH_P_IP));
             assert(packet->ip.version == 4);
             assert(packet->ip.ihl == 5);
