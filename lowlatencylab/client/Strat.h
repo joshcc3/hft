@@ -44,7 +44,7 @@ public:
                PriceL price,
                Qty qty) {
         const auto& [bestBid, bestAsk, bidSize, askSize] = ob.update(isSnapshot, side, localTimestamp, price, qty);
-        if (!isSnapshot) {
+        if (__builtin_expect(!isSnapshot, true)) {
             const SeqNo triggerEvent = seqNo;
             const TimeNs recvTime = mdTime;
             const Qty tradeQty = 1;
@@ -67,8 +67,7 @@ public:
             }
 
             const PriceL notionalChange = price * qty - sidePrice * sideQty;
-
-            if (bidSize != -1 && askSize != -1) {
+            if (__builtin_expect(bidSize != -1 && askSize != -1, true)) {
                 if (notionalChange > TRADE_THRESHOLD) {
                     const PriceL tradePrice = oppSidePrice;
                     const OrderFlags flags{.isBid = !isBid};

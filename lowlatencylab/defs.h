@@ -71,8 +71,8 @@ using MDMsgId = SeqNo;
 
 using TimeNs = i64;
 
-constexpr static int PINNED_CPU = 0;
-constexpr static int SQ_POLL_PINNED_CPU = 1;
+constexpr static int PINNED_CPU = 1;
+constexpr static int SQ_POLL_PINNED_CPU = 2;
 
 constexpr static int MD_PACKET_TYPE = 1;
 constexpr static int OE_PACKET_TYPE = 2;

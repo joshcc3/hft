@@ -135,4 +135,40 @@ These libraries are designed to maximize efficiency and speed, making them suita
 
 Using SQ_POLL with a different thread is terrible for latency even pinning to different cpus.
 the syscall is eliminated but there is a large amount of jitter that is caused.
-I suspect having a dedicated cpu with high priority might make it better
+I suspect having a dedicated cpu with high priority might make it better - yep regain almost single threaded performance. 
+however i think there is a still context switch for the async worker
+
+No SQ Poll
+
+Performance counter stats for './main':                                                                               
+40,819      cpu_core/branch-misses/                                                                        
+1,197,361      cpu_core/cache-misses/                                                                      
+615,409,614      cpu_core/cpu-cycles/                                                                      
+177      minor-faults                                                                                   
+0      major-faults                                                                                   
+183,337,000 ns   user_time                                                                                      
+6,005,000 ns   system_time                                                                                    
+0.203372454 seconds time elapsed                                                                                
+0.183337000 seconds user                                                                                        
+0.006005000 seconds sys             
+
+
+
+Performance counter stats for './main':
+
+     <not counted>      cpu_atom/branch-misses/                                                 (0.00%)
+            47,016      cpu_core/branch-misses/                                               
+     <not counted>      cpu_atom/cache-misses/                                                  (0.00%)
+           974,517      cpu_core/cache-misses/                                                
+     <not counted>      cpu_atom/cpu-cycles/                                                    (0.00%)
+     1,050,610,322      cpu_core/cpu-cycles/                                                  
+               178      minor-faults                                                          
+                 0      major-faults                                                          
+       150,176,000 ns   user_time                                                             
+       158,956,000 ns   system_time                                                           
+
+       0.271231393 seconds time elapsed
+
+       0.150176000 seconds user
+       0.158956000 seconds sys
+
