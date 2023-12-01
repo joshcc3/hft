@@ -189,7 +189,7 @@ int main() {
 
     sched_param schparam{};
     const int receiveThreadPolicy = SCHED_FIFO;
-    const int priority = sched_get_priority_max(receiveThreadPolicy);
+    const int priority = 99; // sched_get_priority_max(receiveThreadPolicy);
     schparam.sched_priority = priority;
     ret = sched_setscheduler(0, receiveThreadPolicy, &schparam);
 
