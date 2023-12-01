@@ -72,7 +72,6 @@ https://www.spinics.net/lists/xdp-newbies/msg00185.html
 look at huge pages and tlb misses.
 
 
-SO_RCVLOWAT and SO_SNDLOWAT
 IORING_SETUP_SQPOLL in io_uring_setup
 
 

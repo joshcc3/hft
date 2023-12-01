@@ -24,6 +24,7 @@
 #include <linux/if_ether.h>
 #include <linux/udp.h>
 #include <netinet/ip.h>
+#include <array>
 
 #define NDEBUG
 
@@ -139,17 +140,24 @@ inline int ORDER_SUBMISSION_PC = 2;
 inline int MSG_HANDLING_PC = 3;
 inline int SYS_RECV_PC = 4;
 
-struct IOUringState {
 
+struct IOUringState {
+    enum class URING_FD {
+        _numFD
+    };
+
+    static constexpr ssize_t FILE_TABLE_SZ = int(URING_FD::_numFD);
     static constexpr int QUEUE_DEPTH = 1 << 10;
 
+    std::array<int, FILE_TABLE_SZ> fileTable{};
     struct io_uring ring{};
 
     IOUringState() {
-        struct io_uring_params params{
+        io_uring_params params{
                 .sq_entries = QUEUE_DEPTH,
                 .cq_entries = QUEUE_DEPTH * 2,
-                .flags = IORING_SETUP_SINGLE_ISSUER
+                .flags = IORING_SETUP_SINGLE_ISSUER, // | IORING_SETUP_SQPOLL,
+                // .sq_thread_idle = 30'000
         };
         if (int error = io_uring_queue_init_params(QUEUE_DEPTH, &ring, &params) < 0) {
             cerr << "Queue init failed [" << error << "]." << endl;
@@ -164,6 +172,19 @@ struct IOUringState {
         assert(ring.cq.ring_entries == 2 * QUEUE_DEPTH);
         assert(ring.sq.sqe_tail == ring.sq.sqe_head);
 
+        if(FILE_TABLE_SZ > 0) {
+            if (const int res = io_uring_register_files_sparse(&ring, FILE_TABLE_SZ); res != 0) {
+                cerr << "Register files (Errno " << -res << ")." << endl;
+                exit(EXIT_FAILURE);
+            }
+        }
+
+
+    }
+
+    void registerFD(URING_FD fdName, int fd) {
+        const int fileTable[1] = {fd};
+        io_uring_register_files_update(&ring, static_cast<int>(fdName), fileTable, 1);
     }
 
     ~IOUringState() {

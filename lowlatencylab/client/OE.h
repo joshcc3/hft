@@ -141,7 +141,6 @@ public:
             throw std::runtime_error("setsockopt(TCP_NODELAY) failed");
         }
 
-
         assert(serverAddr.sin_addr.s_addr != 0);
         assert(serverAddr.sin_port != 0);
 
@@ -184,12 +183,16 @@ public:
 
         io_uring_sqe* submitSqe = ioState.getSqe(o.id + ORDER_TAG);
         int sendFlags = MSG_DONTROUTE | MSG_DONTWAIT;
-        io_uring_prep_send(submitSqe, clientFD, static_cast<void *>(outputBuf), msgSize, sendFlags);
+        io_uring_prep_send(submitSqe, clientFD, outputBuf, msgSize, sendFlags);
         assert(submitSqe->flags == 0);
 
         assert(io_uring_sq_ready(&ioState.ring) == 1);
 
-        int submits = io_uring_submit(&ioState.ring);
+        assert((ioState.ring.sq.kflags & IORING_SQ_NEED_WAKEUP) == 0);
+
+        CLOCK(ORDER_SUBMISSION_PC,
+              int submits = io_uring_submit(&ioState.ring);
+        )
         assert(io_uring_sq_ready(&ioState.ring) == 0);
         assert(submits == 1);
 

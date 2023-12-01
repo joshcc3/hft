@@ -72,15 +72,11 @@ public:
                 if (notionalChange > TRADE_THRESHOLD) {
                     const PriceL tradePrice = oppSidePrice;
                     const OrderFlags flags{.isBid = !isBid};
-                    CLOCK(ORDER_SUBMISSION_PC,
-                          orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
-                    )
+                    orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
                 } else if (notionalChange < -TRADE_THRESHOLD) {
                     const PriceL tradePrice = sidePrice;
                     const OrderFlags flags{.isBid = isBid};
-                    CLOCK(ORDER_SUBMISSION_PC,
-                          orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
-                    )
+                    orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
                 }
             }
         }
