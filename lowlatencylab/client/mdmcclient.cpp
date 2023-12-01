@@ -74,7 +74,7 @@ public:
                     CLOCK(TOT_RECV_PC,
                             strat.recvUdpMD();
                     )
-                    int modulus = 0x1f;
+                    int modulus = 0x1fff;
                     if(__builtin_expect((++counter1 & modulus) == 0, false)) {
 //                    if((++counter1 & modulus) == 0) {
                         TimeNs cTime = currentTimeNs();

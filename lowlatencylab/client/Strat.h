@@ -162,7 +162,6 @@ public:
     }
 
     void recvUdpMD() {
-
         assert(!udpBuf.test(0));
         assert(orderEntry.isConnected());
 
@@ -173,23 +172,23 @@ public:
         const bool isAlive = isConnected();
 
         if (__builtin_expect(isAlive, true)) {
-
-
             io.qs.stateCheck();
             io.umem.stateCheck();
             io.socket.stateCheck();
 
-            // if we get multiple out of order packets then we should process them smartly - last to first.
-            u32 available;
             u32 idx;
-            while ((available = xsk_ring_cons__peek(&io.qs.rxQ, XSKQueues::NUM_READ_DESC, &idx)) == 0) {}
-
+            u32 available;
             u32 fillQIdx;
             u32 reserved;
-            while((reserved = xsk_ring_prod__reserve(&io.qs.fillQ, available, &fillQIdx)) == 0) {}
+            CLOCK(SYS_RECV_PC,
+                  // if we get multiple out of order packets then we should process them smartly - last to first.
+                  while ((available = xsk_ring_cons__peek(&io.qs.rxQ, XSKQueues::NUM_READ_DESC, &idx)) == 0) {}
+                  while ((reserved = xsk_ring_prod__reserve(&io.qs.fillQ, available, &fillQIdx)) == 0) {
+                  }
+            )
             assert(reserved == available);
 
-            for(int i = 0; i < available; ++i) {
+            for (int i = 0; i < available; ++i) {
                 const auto curTime = currentTimeNs();
 
                 const xdp_desc* readDesc = xsk_ring_cons__rx_desc(&io.qs.rxQ, idx + i);
@@ -248,7 +247,6 @@ public:
                 unsigned long long* fillQEntry = xsk_ring_prod__fill_addr(&io.qs.fillQ, fillQIdx + i);
                 assert(fillQEntry != nullptr);
                 *fillQEntry = readDesc->addr;
-
             }
 
             assert(!xsk_ring_prod__needs_wakeup(&io.qs.fillQ));
