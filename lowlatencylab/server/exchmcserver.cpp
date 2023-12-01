@@ -39,7 +39,7 @@ class Exchange {
 
 public:
     Exchange(std::ifstream &f, const string &headerLine, const string &outputFileN)
-            : state(ExchangeState::INIT), ioState(), oe{ioState, md, outputFileN},
+            : state(ExchangeState::INIT), ioState{false}, oe{ioState, md, outputFileN},
               md{ioState, MD_UNICAST_HOSTNAME, f, headerLine} {
         assert(io_uring_sq_ready(&ioState.ring) == 0);
     }

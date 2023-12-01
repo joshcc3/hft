@@ -5,6 +5,8 @@
 #ifndef TICTACTOE_DEFS_H
 #define TICTACTOE_DEFS_H
 
+#include <sys/syscall.h>
+#include <fstream>
 
 #include <openssl/sha.h>
 #include <iostream>
@@ -25,6 +27,7 @@
 #include <linux/udp.h>
 #include <netinet/ip.h>
 #include <array>
+#include <dirent.h>
 
 #define NDEBUG
 
@@ -38,7 +41,6 @@ inline double timeSpent[10] = {0, 0, 0, 0, 0};
 template<typename T>
 inline double elapsed(T t1, T t2) {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count() / 1000000000.0;
-
 }
 
 #define CLOCK(c, a) { \
@@ -70,6 +72,8 @@ using MDMsgId = SeqNo;
 using TimeNs = i64;
 
 constexpr static int PINNED_CPU = 0;
+constexpr static int SQ_POLL_PINNED_CPU = 1;
+
 constexpr static int MD_PACKET_TYPE = 1;
 constexpr static int OE_PACKET_TYPE = 2;
 
@@ -114,7 +118,8 @@ struct Order {
         id{id},
         price{price},
         qty{qty},
-        flags{flags} {}
+        flags{flags} {
+    }
 };
 
 struct OrderInfo {
@@ -123,13 +128,14 @@ struct OrderInfo {
     TimeNs receivedTime = 0;
     TimeNs triggerSubmitTime = 0;
 
-    OrderInfo(const Order &o, TimeNs r, TimeNs t) : orderInfo{o}, receivedTime{r}, triggerSubmitTime{t} {}
+    OrderInfo(const Order& o, TimeNs r, TimeNs t) : orderInfo{o}, receivedTime{r}, triggerSubmitTime{t} {
+    }
 };
 
 
 inline TimeNs currentTimeNs() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
-            (std::chrono::system_clock::now()).time_since_epoch()).count();
+        (std::chrono::system_clock::now()).time_since_epoch()).count();
 }
 
 #define GET_PC(c) timeSpent[c]
@@ -141,6 +147,20 @@ inline int MSG_HANDLING_PC = 3;
 inline int SYS_RECV_PC = 4;
 
 
+inline std::string getProgramNameByTid(pid_t parentTID, pid_t tid) {
+    std::string path = "/proc/" + std::to_string(parentTID) + "/task/" + std::to_string(tid) + "/comm";
+    std::ifstream commFile(path);
+    std::string programName;
+
+    if (commFile.is_open() && std::getline(commFile, programName)) {
+        // Successfully read the program name
+        return programName;
+    } else {
+        // Handle the error if the file cannot be opened or read
+        return "Error: Unable to read program name";
+    }
+}
+
 struct IOUringState {
     enum class URING_FD {
         _numFD
@@ -150,15 +170,27 @@ struct IOUringState {
     static constexpr int QUEUE_DEPTH = 1 << 10;
 
     std::array<int, FILE_TABLE_SZ> fileTable{};
-    struct io_uring ring{};
+    io_uring ring{};
 
-    IOUringState() {
-        io_uring_params params{
+    IOUringState(bool enableSQPoll) {
+        io_uring_params params;
+
+        if (enableSQPoll) {
+            params = {
                 .sq_entries = QUEUE_DEPTH,
                 .cq_entries = QUEUE_DEPTH * 2,
-                .flags = IORING_SETUP_SINGLE_ISSUER, // | IORING_SETUP_SQPOLL,
-                // .sq_thread_idle = 30'000
-        };
+                .flags = IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_SQPOLL | IORING_SETUP_SQ_AFF,
+                .sq_thread_cpu = SQ_POLL_PINNED_CPU,
+                .sq_thread_idle = 30'000,
+            };
+        } else {
+            params = {
+                .sq_entries = QUEUE_DEPTH,
+                .cq_entries = QUEUE_DEPTH * 2,
+                .flags = IORING_SETUP_SINGLE_ISSUER
+            };
+        }
+
         if (int error = io_uring_queue_init_params(QUEUE_DEPTH, &ring, &params) < 0) {
             cerr << "Queue init failed [" << error << "]." << endl;
             throw std::runtime_error("Unable to setup io_uring queue");
@@ -172,14 +204,63 @@ struct IOUringState {
         assert(ring.cq.ring_entries == 2 * QUEUE_DEPTH);
         assert(ring.sq.sqe_tail == ring.sq.sqe_head);
 
-        if(FILE_TABLE_SZ > 0) {
+        if (FILE_TABLE_SZ > 0) {
             if (const int res = io_uring_register_files_sparse(&ring, FILE_TABLE_SZ); res != 0) {
                 cerr << "Register files (Errno " << -res << ")." << endl;
                 exit(EXIT_FAILURE);
             }
         }
 
+        if (enableSQPoll) {
+            // Wait for process completion to finish
+            usleep(100'000);
+            // Wait for sq-poll to be scheduled
+            pid_t mainTID = syscall(SYS_gettid);
+            pid_t guessedSQPollTID = -1;
 
+
+            std::string path = "/proc/" + std::to_string(mainTID) + "/task/";
+
+            const char* dirPath = path.c_str();
+            DIR* dir = opendir(dirPath);
+
+            if (dir == nullptr) {
+                std::perror("opendir failed");
+                exit(EXIT_FAILURE);
+            }
+
+           const dirent* entry;
+            while ((entry = readdir(dir)) != nullptr) {
+                if(entry->d_name[0] != '.') {
+                    int tid = std::stoi(entry->d_name);
+                    if(tid != mainTID) {
+                        if(guessedSQPollTID != -1) {
+                            cerr << "Unexpected number of worker threads" << endl;
+                        } else {
+                            guessedSQPollTID = tid;
+                        }
+                    }
+                }
+            }
+
+            auto comm = getProgramNameByTid(mainTID, guessedSQPollTID);
+            if(comm.compare(0, 8, "iou-sqp-") != 0) {
+                cerr << "Could not find sq-poll tid" << endl;
+                usleep(100'000'000);
+                exit(EXIT_FAILURE);
+            }
+
+            cout << "Kernel SQ Poll Thread [" << guessedSQPollTID << "] [" << comm << "]." << endl;
+
+            sched_param schparam{};
+            const int receiveThreadPolicy = SCHED_FIFO;
+            const int priority = sched_get_priority_max(receiveThreadPolicy);
+            schparam.sched_priority = priority;
+            if (sched_setscheduler(0, receiveThreadPolicy, &schparam)) {
+                cerr << "Error [" << errno << " in setting priority: " << strerror(errno) << endl;
+                exit(EXIT_FAILURE);
+            }
+        }
     }
 
     void registerFD(URING_FD fdName, int fd) {
@@ -191,9 +272,9 @@ struct IOUringState {
         io_uring_queue_exit(&ring);
     }
 
-    [[nodiscard]] io_uring_sqe *getSqe(u64 tag) {
+    [[nodiscard]] io_uring_sqe* getSqe(u64 tag) {
         assert(tag < (u64(1) << 31));
-        io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+        io_uring_sqe* sqe = io_uring_get_sqe(&ring);
         assert(nullptr != sqe);
         io_uring_sqe_set_data64(sqe, tag);
 
@@ -210,8 +291,8 @@ struct IOUringState {
         return io_uring_submit_and_wait(&ring, n);
     }
 
-    io_uring_cqe *popCqe() {
-        io_uring_cqe *cqe;
+    io_uring_cqe* popCqe() {
+        io_uring_cqe* cqe;
         // TODO: I get interrupts here - un sure why
         int res = io_uring_wait_cqe(&ring, &cqe);
         assert(res == 0);
@@ -241,12 +322,12 @@ struct MDPacket {
     MDPacket() = default;
 
     MDPacket(SeqNo seqNo, TimeNs localTimestamp, PriceL price, Qty qty, MDFlags flags) : seqNo{seqNo},
-                                                                                         localTimestamp{localTimestamp},
-                                                                                         price{price}, qty{qty},
-                                                                                         flags{flags}, _padding{} {}
+        localTimestamp{localTimestamp},
+        price{price}, qty{qty},
+        flags{flags}, _padding{} {
+    }
 
-    MDPacket(const MDPacket &other) = default;
-
+    MDPacket(const MDPacket& other) = default;
 };
 
 struct MDFrame {
@@ -255,16 +336,15 @@ struct MDFrame {
     udphdr udp;
 } __attribute__((packed));
 
-inline bool operator==(const IOUringState &s1, const IOUringState &s2) {
+inline bool operator==(const IOUringState& s1, const IOUringState& s2) {
     return &s1 == &s2;
 }
 
 struct cqe_guard {
+    io_uring_cqe* completion;
+    IOUringState& ring;
 
-    io_uring_cqe *completion;
-    IOUringState &ring;
-
-    explicit cqe_guard(IOUringState &ring) : ring{ring} {
+    explicit cqe_guard(IOUringState& ring) : ring{ring} {
         completion = ring.popCqe();
     }
 
@@ -284,13 +364,13 @@ inline constexpr uint16_t MD_UNICAST_PORT = 4321;
 inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 500'000'000;
 
 
-inline int parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localTimestamp, bool &isSnapshot, Side &side,
-                   PriceL &priceL,
-                   Qty &qty) {
+inline int parseDeribitMDLine(const char* msg, TimeNs& timestamp, TimeNs& localTimestamp, bool& isSnapshot, Side& side,
+                              PriceL& priceL,
+                              Qty& qty) {
     int matched = 6;
 
-//        string a = "deribit,BTC-PERPETUAL,";
-//        static_assert(sizeof(string) == 24 && a.size() == 22); // small string optimization
+    //        string a = "deribit,BTC-PERPETUAL,";
+    //        static_assert(sizeof(string) == 24 && a.size() == 22); // small string optimization
     int startIx = 21; // a.size() - 1;
 
     // 1585699200245000
@@ -299,21 +379,21 @@ inline int parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localT
     for (int i = 0; i < 16; ++i) {
         _timestamp = _timestamp * 10 + (msg[++ix] - '0');
     }
-//        assert(_timestamp == timestamp);
+    //        assert(_timestamp == timestamp);
     ++ix;
     TimeNs _localtimestamp = 0;
     for (int i = 0; i < 16; ++i) {
         _localtimestamp = _localtimestamp * 10 + (msg[++ix] - '0');
     }
-//        assert(_localtimestamp == localTimestamp);
+    //        assert(_localtimestamp == localTimestamp);
 
     ix += 2;
     bool _isSnapshot = msg[ix] == 't';
-//        assert(_isSnapshot == isSnapshot);
+    //        assert(_isSnapshot == isSnapshot);
 
     ix += _isSnapshot ? 5 : 6;
     Side _side_ = msg[ix] == 'b' ? Side::BUY : Side::SELL;
-//        assert(side == _side_);
+    //        assert(side == _side_);
 
     PriceL _price{};
     ix += 3;
@@ -332,13 +412,13 @@ inline int parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localT
     } else {
         _price = decimal * PRECISION_L;
     }
-//        assert(_price == priceL);
+    //        assert(_price == priceL);
 
     Qty _qty{};
     while (msg[++ix] != '\0') {
         _qty = _qty * 10 + (msg[ix] - '0');
     }
-//        assert(_qty == qty);
+    //        assert(_qty == qty);
 
     timestamp = _timestamp;
     localTimestamp = _localtimestamp;
@@ -350,11 +430,11 @@ inline int parseDeribitMDLine(const char *msg, TimeNs &timestamp, TimeNs &localT
 }
 
 
-inline bool checkMessageDigest(const u8 *buf, ssize_t bytes) {
+inline bool checkMessageDigest(const u8* buf, ssize_t bytes) {
     static std::unordered_map<int, MDPacket> seenHashes{};
-    const MDPacket &p = *reinterpret_cast<const MDPacket *>(buf);
+    const MDPacket& p = *reinterpret_cast<const MDPacket *>(buf);
 
-    const auto &[e, inserted] = seenHashes.emplace(p.seqNo, p);
+    const auto& [e, inserted] = seenHashes.emplace(p.seqNo, p);
 
     assert(inserted);
     return true;

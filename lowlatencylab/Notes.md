@@ -131,3 +131,8 @@ Seastar: An advanced, open-source C++ framework for high-performance server appl
 These libraries are designed to maximize efficiency and speed, making them suitable for the demands of HFT environments.
 
 
+
+
+Using SQ_POLL with a different thread is terrible for latency even pinning to different cpus.
+the syscall is eliminated but there is a large amount of jitter that is caused.
+I suspect having a dedicated cpu with high priority might make it better
