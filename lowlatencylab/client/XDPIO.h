@@ -23,9 +23,9 @@
 
 struct XSKQueues {
     constexpr static int NUM_READ_DESC = XSK_RING_CONS__DEFAULT_NUM_DESCS * 8;
-    constexpr static int NUM_WRITE_DESC = XSK_RING_PROD__DEFAULT_NUM_DESCS * 8;
+    constexpr static int NUM_WRITE_DESC = XSK_RING_PROD__DEFAULT_NUM_DESCS;
     constexpr static int NUM_FILL_DESC = XSK_RING_PROD__DEFAULT_NUM_DESCS * 16;
-    constexpr static int NUM_COMPLETION_DESC = XSK_RING_CONS__DEFAULT_NUM_DESCS * 8;
+    constexpr static int NUM_COMPLETION_DESC = XSK_RING_CONS__DEFAULT_NUM_DESCS;
     xsk_ring_cons completionQ{};
     xsk_ring_prod fillQ{};
     xsk_ring_prod txQ{};
@@ -39,15 +39,41 @@ struct XSKQueues {
     }
 };
 
-struct XSKUmem {
-    constexpr static int NUM_FRAMES = 1 << 14;
-    constexpr static int FRAME_SIZE = 1 << 12;
+constexpr static int XSKUmem_FRAME_SIZE = 1 << 12;
 
+class UmemTxSlotState {
+    constexpr static int MASK = XSKQueues::NUM_WRITE_DESC - 1;
+    static_assert(__builtin_popcount(XSKQueues::NUM_WRITE_DESC) == 1);
+
+public:
+    std::bitset<XSKQueues::NUM_WRITE_DESC> umemFrameState{};
+    int front{0};
+
+    u32 nextSlot() {
+        assert(front < XSKQueues::NUM_WRITE_DESC);
+        int nextSlot = front;
+        assert(!umemFrameState.test(nextSlot));
+        umemFrameState.set(nextSlot);
+        front = (front + 1) & MASK;
+        return (nextSlot + XSKQueues::NUM_FILL_DESC) * XSKUmem_FRAME_SIZE;
+    }
+
+    void release(u64 _addr) {
+        u64 frameNo = _addr / XSKUmem_FRAME_SIZE;
+        umemFrameState.reset(frameNo);
+    }
+};
+
+struct XSKUmem {
+    constexpr static int NUM_FRAMES = XSKQueues::NUM_FILL_DESC + XSKQueues::NUM_WRITE_DESC;
+
+    UmemTxSlotState txState{};
     xsk_umem* umem{};
     u8* buffer{};
 
+
     explicit XSKUmem(XSKQueues& qs) {
-        constexpr int bufferSz = XSKUmem::NUM_FRAMES * XSKUmem::FRAME_SIZE;
+        constexpr int bufferSz = XSKUmem::NUM_FRAMES * XSKUmem_FRAME_SIZE;
         buffer = static_cast<u8 *>(mmap(nullptr, bufferSz,
                                         PROT_READ | PROT_WRITE,
                                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0));
@@ -59,7 +85,7 @@ struct XSKUmem {
         xsk_umem_config cfg = {
             .fill_size = XSKQueues::NUM_FILL_DESC,
             .comp_size = XSKQueues::NUM_COMPLETION_DESC,
-            .frame_size = XSKUmem::FRAME_SIZE,
+            .frame_size = XSKUmem_FRAME_SIZE,
             .frame_headroom = XSK_UMEM__DEFAULT_FRAME_HEADROOM,
             .flags = 0
         };
@@ -95,8 +121,8 @@ struct XSKSocket {
         cfg.xdp_flags = XDP_FLAGS_SKB_MODE;
         cfg.bind_flags = XDP_USE_NEED_WAKEUP | XDP_COPY;
 
-        if (int ret = xsk_socket__create(&socket, iface.c_str(), QUEUE, umem.umem,
-                                         &qs.rxQ, &qs.txQ, &cfg)) {
+        if (xsk_socket__create(&socket, iface.c_str(), QUEUE, umem.umem,
+                               &qs.rxQ, &qs.txQ, &cfg)) {
             perror("XSK: ");
             exit(EXIT_FAILURE);
         }
@@ -197,7 +223,8 @@ public:
     XSKUmem umem;
     XSKSocket socket;
 
-    explicit XDPIO(const std::string& iface, const std::string& xdpProgPinPath): qs{}, umem{qs}, socket{umem, qs, iface, xdpProgPinPath} {
+    explicit XDPIO(const std::string& iface, const std::string& xdpProgPinPath): qs{}, umem{qs},
+        socket{umem, qs, iface, xdpProgPinPath} {
         const rlimit r = {RLIM_INFINITY, RLIM_INFINITY};
         if (setrlimit(RLIMIT_MEMLOCK, &r)) {
             cerr << "ERROR: setrlimit(RLIMIT_MEMLOCK): " << errno << endl;
@@ -215,14 +242,80 @@ public:
         assert(idx == 0);
 
         for (int i = 0; i < prodReserveRes; i++) {
-            *xsk_ring_prod__fill_addr(&qs.fillQ, idx++) = i * XSKUmem::FRAME_SIZE;
+            *xsk_ring_prod__fill_addr(&qs.fillQ, idx++) = i * XSKUmem_FRAME_SIZE;
         }
         xsk_ring_prod__submit(&qs.fillQ, XSKQueues::NUM_FILL_DESC);
     }
 
-    u8* getWriteBuff(ssize_t sz);
+    std::tuple<u32, u32, u32, u32> blockRecv() {
+        u32 available;
+        u32 reserved;
+        u32 idx;
+        u32 fillQIdx;
 
-    void triggerWrite();
+        while ((available = xsk_ring_cons__peek(&qs.rxQ, XSKQueues::NUM_READ_DESC, &idx)) == 0) {
+        }
+        while ((reserved = xsk_ring_prod__reserve(&qs.fillQ, available, &fillQIdx)) == 0) {
+        }
+
+        return {available, reserved, idx, fillQIdx};
+    }
+
+    u8* getWriteBuff(ssize_t sz) {
+        assert(sz < XSKUmem_FRAME_SIZE);
+        u32 txIdx = -1;
+        assert(qs.txQ.mask != 0);
+        const u32 txSlotsRecvd = xsk_ring_prod__reserve(&qs.txQ, 1, &txIdx);
+        if (__builtin_expect(txSlotsRecvd != 1, false)) {
+            cerr << "Could not reserve tx slots." << endl;
+            exit(EXIT_FAILURE);
+        }
+
+        u32 addr = umem.txState.nextSlot() * XSKUmem_FRAME_SIZE;
+
+        xdp_desc* txDescr = xsk_ring_prod__tx_desc(&qs.txQ, txIdx);
+        assert(nullptr != txDescr);
+        txDescr->addr = addr;
+        txDescr->len = sizeof(OrderFrame);
+        txDescr->options = 0;
+
+        u8* writeBuf = umem.buffer + addr;
+        return writeBuf;
+    }
+
+    void triggerWrite() {
+        assert(umem.txState.umemFrameState.any());
+        xsk_ring_prod__submit(&qs.txQ, 1);
+
+        assert(((sock.socketCfg.bindFlags & XDP_COPY) != 0) == xsk_ring_prod__needs_wakeup(tx));
+        if (xsk_ring_prod__needs_wakeup(&qs.txQ)) {
+            // TODO - this is onyl needed in COPY mode, not needed for zero-copy mode, driven by the napi loop
+            assert(sock.xskFD > 2);
+            assert((sock.socketCfg.bindFlags & XDP_COPY) != 0);
+            const ssize_t ret = sendto(socket.xskFD, nullptr, 0, MSG_DONTWAIT, nullptr, 0);
+
+            if (!(ret >= 0 || errno == ENOBUFS || errno == EAGAIN ||
+                  errno == EBUSY || errno == ENETDOWN)) {
+                perror("Kick did not work");
+                exit(EXIT_FAILURE);
+            }
+        } else {
+            assert((sock.socketCfg.bindFlags & XDP_COPY) == 0);
+        }
+    }
+
+    void complete() {
+        u32 idx = -1;
+        const u32 rcvd = xsk_ring_cons__peek(&qs.completionQ, 1, &idx);
+        if (rcvd > 0) {
+            for(int i = 0; i < rcvd; ++i) {
+                const __u64 desc = *xsk_ring_cons__comp_addr(&qs.completionQ, idx + i) & (XSKUmem::NUM_FRAMES - 1);
+                umem.txState.release(desc);
+            }
+            xsk_ring_cons__release(&qs.completionQ, rcvd);
+
+        }
+    }
 };
 
 #endif //XDPIO_H

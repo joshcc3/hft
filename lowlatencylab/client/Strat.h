@@ -94,7 +94,6 @@ public:
         UDPBuffer<Strat>::MaskType ogMask = udpBuf.mask;
         const u32 ogLowestSeqNum = udpBuf.nextMissingSeqNo;
         const u32 ogHead = udpBuf.head;
-        const OrderId ogCurOrder = orderEntry.curOrder.id;
 
         const u8* finalBufPos = inBuf;
 
@@ -107,7 +106,7 @@ public:
             assert(packet.price > 0);
             assert(packet.qty >= 0);
             const int processed = udpBuf.newMessage(time, packet, *this);
-            assert(orderEntry.curOrder.id == ogCurOrder || processed > 0);
+            assert(processed > 0);
             finalBufPos += sizeof(MDPacket);
         }
 
@@ -177,9 +176,11 @@ public:
             u32 reserved;
             CLOCK(SYS_RECV_PC,
                   // if we get multiple out of order packets then we should process them smartly - last to first.
-                  while ((available = xsk_ring_cons__peek(&io.qs.rxQ, XSKQueues::NUM_READ_DESC, &idx)) == 0) {}
-                  while ((reserved = xsk_ring_prod__reserve(&io.qs.fillQ, available, &fillQIdx)) == 0) {
-                  }
+                  const auto& res = io.blockRecv();
+                  available = std::get<0>(res);
+                  reserved = std::get<1>(res);
+                  idx = std::get<2>(res);
+                  fillQIdx = std::get<3>(res);
             )
             assert(reserved == available);
 

@@ -60,6 +60,8 @@ using u64 = uint64_t;
 using i64 = int64_t;
 using u32 = uint32_t;
 using i32 = int32_t;
+using u16 = uint16_t;
+using i16 = int16_t;
 using u8 = uint8_t;
 using i8 = int8_t;
 
@@ -120,7 +122,15 @@ struct Order {
         qty{qty},
         flags{flags} {
     }
-};
+} __attribute__((packed));
+
+struct OrderFrame {
+    ethhdr eth{};
+    iphdr ip{};
+    udphdr udp{};
+    Order o{};
+} __attribute__((packed));
+
 
 struct OrderInfo {
     Order orderInfo;
@@ -229,12 +239,12 @@ struct IOUringState {
                 exit(EXIT_FAILURE);
             }
 
-           const dirent* entry;
+            const dirent* entry;
             while ((entry = readdir(dir)) != nullptr) {
-                if(entry->d_name[0] != '.') {
+                if (entry->d_name[0] != '.') {
                     int tid = std::stoi(entry->d_name);
-                    if(tid != mainTID) {
-                        if(guessedSQPollTID != -1) {
+                    if (tid != mainTID) {
+                        if (guessedSQPollTID != -1) {
                             cerr << "Unexpected number of worker threads" << endl;
                         } else {
                             guessedSQPollTID = tid;
@@ -244,7 +254,7 @@ struct IOUringState {
             }
 
             auto comm = getProgramNameByTid(mainTID, guessedSQPollTID);
-            if(comm.compare(0, 8, "iou-sqp-") != 0) {
+            if (comm.compare(0, 8, "iou-sqp-") != 0) {
                 cerr << "Could not find sq-poll tid" << endl;
                 usleep(100'000'000);
                 exit(EXIT_FAILURE);
@@ -438,6 +448,126 @@ inline bool checkMessageDigest(const u8* buf, ssize_t bytes) {
 
     assert(inserted);
     return true;
+}
+
+
+static inline unsigned short from32to16(unsigned int x) {
+    /* add up 16-bit and 16-bit for 16+c bit */
+    x = (x & 0xffff) + (x >> 16);
+    /* add up carry.. */
+    x = (x & 0xffff) + (x >> 16);
+    return x;
+}
+
+static unsigned int do_csum(const unsigned char* buff, int len) {
+    unsigned int result = 0;
+
+    assert(len == 20);
+    assert(((unsigned long)buff & 0xf) == 0xe);
+
+    if (2 & (unsigned long) buff) {
+        result += *(unsigned short *) buff;
+        len -= 2;
+        buff += 2;
+    }
+    assert(len >= 4);
+
+    const unsigned char* end = buff + ((unsigned) len & ~3);
+    unsigned int carry = 0;
+
+    do {
+        unsigned int w = *(unsigned int *) buff;
+        buff += 4;
+        result += carry;
+        result += w;
+        carry = (w > result);
+    } while (buff < end);
+
+    result += carry;
+    result = (result & 0xffff) + (result >> 16);
+
+    if (len & 2) {
+        result += *(unsigned short *) buff;
+        buff += 2;
+    }
+
+    result = from32to16(result);
+
+    return result;
+}
+
+
+inline u16 ip_fast_csum(const u8* iph, u32 ihl) {
+    return (u16) ~do_csum(iph, ihl * 4);
+}
+
+
+/*
+ * Fold a partial checksum
+ * This function code has been taken from
+ * Linux kernel include/asm-generic/checksum.h
+ */
+static inline __sum16 csum_fold(__wsum csum) {
+    u32 sum = (u32) csum;
+
+    sum = (sum & 0xffff) + (sum >> 16);
+    sum = (sum & 0xffff) + (sum >> 16);
+    return (__sum16) ~sum;
+}
+
+/*
+ * This function code has been taken from
+ * Linux kernel lib/checksum.c
+ */
+static inline u32 from64to32(u64 x) {
+    /* add up 32-bit and 32-bit for 32+c bit */
+    x = (x & 0xffffffff) + (x >> 32);
+    /* add up carry.. */
+    x = (x & 0xffffffff) + (x >> 32);
+    return (u32) x;
+}
+
+__wsum csum_tcpudp_nofold(__be32 saddr, __be32 daddr,
+                          __u32 len, __u8 proto, __wsum sum);
+
+/*
+ * This function code has been taken from
+ * Linux kernel lib/checksum.c
+ */
+inline __wsum csum_tcpudp_nofold(__be32 saddr, __be32 daddr,
+                          __u32 len, __u8 proto, __wsum sum) {
+    unsigned long long s = (u32) sum;
+
+    s += (u32) saddr;
+    s += (u32) daddr;
+#ifdef __BIG_ENDIAN__
+	s += proto + len;
+#else
+    s += (proto + len) << 8;
+#endif
+    return (__wsum) from64to32(s);
+}
+
+/*
+ * This function has been taken from
+ * Linux kernel include/asm-generic/checksum.h
+ */
+static inline u16
+csum_tcpudp_magic(__be32 saddr, __be32 daddr, __u32 len,
+                  __u8 proto, __wsum sum) {
+    return csum_fold(csum_tcpudp_nofold(saddr, daddr, len, proto, sum));
+}
+
+static inline u16 udp_csum(u32 saddr, u32 daddr, u32 len,
+                           u8 proto, u16* udp_pkt) {
+    u32 csum = 0;
+    u32 cnt = 0;
+
+    /* udp hdr and data */
+    for (; cnt < len; cnt += 2)
+        csum += udp_pkt[cnt >> 1];
+
+    return csum_tcpudp_magic(saddr, daddr, len, proto, csum);
 }
 
 

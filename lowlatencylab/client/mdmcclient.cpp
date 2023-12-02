@@ -28,12 +28,12 @@ class Driver {
 
     StrategyState state = StrategyState::INIT;
 
-    IOUringState ioState{true};
+    IOUringState ioState{false};
     int fileTable[1]{};
 
     XDPIO io{"lo", "/sys/fs/bpf/strat"};
     L2OB ob{};
-    OE oe{ioState, "lll-1.oe"};
+    OE oe{io, "lll-1.oe"};
     Strat strat{oe, ob, io};
 
 public:
@@ -75,7 +75,7 @@ public:
                     CLOCK(TOT_RECV_PC,
                             strat.recvUdpMD();
                     )
-                    const int modulus = 0;
+                    const int modulus = 0x1ffff;
                     if(__builtin_expect((++counter1 & modulus) == 0, false)) {
 //                    if((++counter1 & modulus) == 0) {
 const TimeNs cTime = currentTimeNs();
