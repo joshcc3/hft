@@ -101,7 +101,7 @@ struct UDPBuffer {
 
             if (seqNo == nextMissingSeqNo) {
 
-                CLOCK(MSG_HANDLING_PC,
+                // CLOCK(MSG_HANDLING_PC,
                         int maxFull = 1;
                         MaskType alignedMask = rotr(mask, head);
                         assert(rotl(alignedMask, head) == mask);
@@ -122,7 +122,7 @@ struct UDPBuffer {
                             unprocessed.pop();
                             totalPacketsProccessed += newMessage(time, p, packetProcessor);
                         }
-                )
+                // )
 
             } else {
                 totalPacketsProccessed = 0;
