@@ -11,7 +11,7 @@ cat /proc/net/snmp
 
 
 network code in net/core/dev.c
-
+    
 netif_receive_skb
 netif_receive_skb_internal
 __netif_receive_skb_one_core
@@ -19,3 +19,29 @@ __netif_receive_skb_core
 deliver_skb
 ip_recv
 ip_recv_core
+
+
+simple hist example
+    # echo 'hist:keys=skbaddr.hex:vals=len' > \
+      /sys/kernel/tracing/events/net/netif_rx/trigger
+
+    # cat /sys/kernel/tracing/events/net/netif_rx/hist
+
+    # echo '!hist:keys=skbaddr.hex:vals=len' > \
+      /sys/kernel/tracing/events/net/netif_rx/trigger
+
+simple conditional trigger example
+echo 'hist:keys=skbaddr.hex:vals=len:pause' > /sys/kernel/tracing/events/net/netif_receive_skb/trigger
+echo 'enable_hist:net:netif_receive_skb if filename==/usr/bin/wget' > /sys/kernel/tracing/events/sched/sched_process_exec/trigger
+echo 'disable_hist:net:netif_receive_skb if comm==wget' > /sys/kernel/tracing/events/sched/sched_process_exit/trigger
+
+to get stack traces:
+echo 'hist:keys=common_stacktrace:values=bytes_req,bytes_alloc:sort=bytes_alloc' > /sys/kernel/tracing/events/kmem/kmalloc/trigger
+
+
+udo bpftrace -e 'kprobe:ip_rcv /comm=="nc"/ { printf("%s\n", ((struct net_device*)arg1)->name); }'
+
+
+which events:
+whats the condition
+how to do stack trace and rank them
