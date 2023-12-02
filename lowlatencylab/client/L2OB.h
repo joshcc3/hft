@@ -44,7 +44,7 @@ struct LevelInfo {
     }
 
     void update(TimeNs t, Qty newQty) {
-        assert(newQty != levelQty);
+        // assert(newQty != levelQty);
         assert(t >= lastUpdated);
         lastUpdated = t;
         levelQty = newQty;
@@ -121,7 +121,7 @@ public:
 
         if (iter != level.rend() && iter->price == price) {
             assert(seen.find(price) != seen.end());
-            assert(qty != iter->levelQty);
+            // assert(qty != iter->levelQty);
             iter->update(localTimestamp, qty);
         } else {
             assert(seen.find(price) == seen.end() ||

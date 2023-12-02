@@ -67,6 +67,9 @@ int strat(struct xdp_md *ctx)
     } else if(p->udp.dest == htons(MD_UNICAST_PORT)) {
       bpf_printk("Malformed udp packet to md unicast port");
       return XDP_PASS;
+    } else if(p->packetType == 2) {
+      bpf_printk("OE Packet");
+      return XDP_PASS;
     }
 
     return XDP_PASS;

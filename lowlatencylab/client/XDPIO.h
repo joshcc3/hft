@@ -271,7 +271,7 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        u32 addr = umem.txState.nextSlot() * XSKUmem_FRAME_SIZE;
+        u32 addr = umem.txState.nextSlot();
 
         xdp_desc* txDescr = xsk_ring_prod__tx_desc(&qs.txQ, txIdx);
         assert(nullptr != txDescr);
