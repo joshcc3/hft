@@ -84,15 +84,13 @@ public:
     void establishConnection() {
         assert(clientFD == -1);
         assert(orderId == 1);
-        assert(io_uring_sq_ready(&ioState.ring) == 0);
-        assert(io_uring_cq_ready(&ioState.ring) == 0);
 
         clientFD = socket(AF_INET, SOCK_STREAM, 0);
         if (clientFD == -1) {
             cerr << "Could not create oe server [" << errno << "]" << endl;
             exit(EXIT_FAILURE);
         }
-        assert(clientFD == 7); // assume that this is the second socket opened
+        assert(clientFD == 6); // assume that this is the second socket opened
 
         int enable = 1;
         if (setsockopt(clientFD, SOL_SOCKET, SO_DONTROUTE, &enable, sizeof(enable)) < 0) {
@@ -157,8 +155,6 @@ public:
         */
 
         assert(clientFD != -1);
-        assert(io_uring_sq_space_left(&ioState.ring) > 1);
-        assert(io_uring_sq_ready(&ioState.ring) == 0);
 
 
         u8* outputBuf = io.getWriteBuff(sizeof(OrderFrame));
@@ -193,11 +189,11 @@ public:
 
 
         assert(frame.ip.check != 0);
-        assert(umemLoc->eth.h_proto == htons(ETH_P_IP));
-        assert(umemLoc->ip.frag_off == 0);
-        assert(umemLoc->ip.ttl != 0);
-        assert(umemLoc->ip.protocol == 17);
-        assert(umemLoc->ip.tot_len == (htons(sizeof(PacketIn) - sizeof(ethhdr))));
+        assert(frame.eth.h_proto == htons(ETH_P_IP));
+        assert(frame.ip.frag_off == 0);
+        assert(frame.ip.ttl != 0);
+        assert(frame.ip.protocol == 17);
+        assert(frame.ip.tot_len == (htons(sizeof(OrderFrame) - sizeof(ethhdr))));
 
 
 
@@ -250,21 +246,6 @@ public:
         }
     }
 
-    void completeMessage(io_uring_cqe& completion) {
-        auto curTime = currentTimeNs();
-
-        assert(io_uring_cq_ready(&ioState.ring) >= 1);
-        assert(clientFD > 2);
-        assert(orderId > 1);
-        assert(curOrder.id >= 1);
-
-        i32 cRes = completion.res;
-        u32 cFlags = completion.flags;
-        u64 cUserData = io_uring_cqe_get_data64(&completion);
-
-        OrderId receivedId = cUserData - ORDER_TAG;
-
-    }
 };
 
 #endif //LLL_EXCHANGE_OE_H

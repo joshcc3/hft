@@ -196,9 +196,9 @@ public:
                 assert(xsk_umem__extract_offset(addr) == 0);
                 assert(options == 0);
                 assert((u64(io.umem.buffer) & 4095) == 0);
-                assert((addr & 255) == 0 && ((addr - 256) & (io.umem.FRAME_SIZE - 1)) == 0);
-                assert(addr < io.umem.FRAME_SIZE * (io.umem.NUM_FRAMES - 1));
-                assert(len < io.umem.FRAME_SIZE);
+                assert((addr & 255) == 0 && ((addr - 256) & (XSKUmem_FRAME_SIZE - 1)) == 0);
+                assert(addr < XSKUmem_FRAME_SIZE * (io.umem.NUM_FRAMES - 1));
+                assert(len < XSKUmem_FRAME_SIZE);
 
                 u8* readAddr = static_cast<u8 *>(xsk_umem__get_data(io.umem.buffer, addr));
 

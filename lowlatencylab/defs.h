@@ -29,7 +29,7 @@
 #include <array>
 #include <dirent.h>
 
-#define NDEBUG
+// #define NDEBUG
 
 #ifdef NDEBUG
 #undef assert

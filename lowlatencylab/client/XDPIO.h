@@ -109,11 +109,11 @@ struct XSKUmem {
 struct XSKSocket {
     constexpr static int QUEUE = 0;
 
+    xsk_socket_config cfg{};
     int xskFD{-1};
     xsk_socket* socket{};
 
     XSKSocket(const XSKUmem& umem, XSKQueues& qs, const std::string& iface, const std::string& xdpProgPinPath) {
-        xsk_socket_config cfg{};
 
         cfg.rx_size = XSKQueues::NUM_READ_DESC;
         cfg.tx_size = XSKQueues::NUM_WRITE_DESC;
@@ -287,11 +287,11 @@ public:
         assert(umem.txState.umemFrameState.any());
         xsk_ring_prod__submit(&qs.txQ, 1);
 
-        assert(((sock.socketCfg.bindFlags & XDP_COPY) != 0) == xsk_ring_prod__needs_wakeup(tx));
+        assert(((socket.cfg.bind_flags & XDP_COPY) != 0) == xsk_ring_prod__needs_wakeup(&qs.txQ));
         if (xsk_ring_prod__needs_wakeup(&qs.txQ)) {
             // TODO - this is onyl needed in COPY mode, not needed for zero-copy mode, driven by the napi loop
-            assert(sock.xskFD > 2);
-            assert((sock.socketCfg.bindFlags & XDP_COPY) != 0);
+            assert(socket.xskFD > 2);
+            assert((socket.cfg.bind_flags & XDP_COPY) != 0);
             const ssize_t ret = sendto(socket.xskFD, nullptr, 0, MSG_DONTWAIT, nullptr, 0);
 
             if (!(ret >= 0 || errno == ENOBUFS || errno == EAGAIN ||
@@ -300,7 +300,7 @@ public:
                 exit(EXIT_FAILURE);
             }
         } else {
-            assert((sock.socketCfg.bindFlags & XDP_COPY) == 0);
+            assert((socket.cfg.bind_flags & XDP_COPY) == 0);
         }
     }
 
