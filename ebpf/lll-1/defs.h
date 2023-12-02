@@ -159,7 +159,7 @@ csum_tcpudp_magic(__be32 saddr, __be32 daddr, __u32 len,
 	return csum_fold(csum_tcpudp_nofold(saddr, daddr, len, proto, sum));
 }
 
-static inline u16 udp_csum(u32 saddr, u32 daddr, u32 len,
+static inline u16 tcpudp_csum(u32 saddr, u32 daddr, u32 len,
 			   u8 proto, u16 *udp_pkt)
 {
 	u32 csum = 0;

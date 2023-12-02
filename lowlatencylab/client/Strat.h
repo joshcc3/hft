@@ -94,7 +94,6 @@ public:
         UDPBuffer<Strat>::MaskType ogMask = udpBuf.mask;
         const u32 ogLowestSeqNum = udpBuf.nextMissingSeqNo;
         const u32 ogHead = udpBuf.head;
-        const OrderId ogCurOrder = orderEntry.curOrder.id;
 
         const u8* finalBufPos = inBuf;
 
@@ -103,11 +102,16 @@ public:
             const TimeNs timeDelay = currentTimeNs() - packet.localTimestamp;
             // assert(timeDelay <= 5'000'000'000);
             assert(packet.packetType == MD_PACKET_TYPE);
-            assert(packet.seqNo >= 0 || packet.flags.isTerm);
-            assert(packet.price > 0);
-            assert(packet.qty >= 0);
-            const int processed = udpBuf.newMessage(time, packet, *this);
-            assert(orderEntry.curOrder.id == ogCurOrder || processed > 0);
+            if(__builtin_expect(!packet.flags.isTerm, true)) {
+                assert(packet.seqNo >= 0 || packet.flags.isTerm);
+                assert(packet.price > 0);
+                assert(packet.qty >= 0);
+                const int processed = udpBuf.newMessage(time, packet, *this);
+                assert(processed > 0);
+            } else {
+                assert(i == numPackets - 1);
+                isComplete = true;
+            }
             finalBufPos += sizeof(MDPacket);
         }
 
@@ -177,9 +181,11 @@ public:
             u32 reserved;
             CLOCK(SYS_RECV_PC,
                   // if we get multiple out of order packets then we should process them smartly - last to first.
-                  while ((available = xsk_ring_cons__peek(&io.qs.rxQ, XSKQueues::NUM_READ_DESC, &idx)) == 0) {}
-                  while ((reserved = xsk_ring_prod__reserve(&io.qs.fillQ, available, &fillQIdx)) == 0) {
-                  }
+                  const auto& res = io.blockRecv();
+                  available = std::get<0>(res);
+                  reserved = std::get<1>(res);
+                  idx = std::get<2>(res);
+                  fillQIdx = std::get<3>(res);
             )
             assert(reserved == available);
 
@@ -195,9 +201,9 @@ public:
                 assert(xsk_umem__extract_offset(addr) == 0);
                 assert(options == 0);
                 assert((u64(io.umem.buffer) & 4095) == 0);
-                assert((addr & 255) == 0 && ((addr - 256) & (io.umem.FRAME_SIZE - 1)) == 0);
-                assert(addr < io.umem.FRAME_SIZE * (io.umem.NUM_FRAMES - 1));
-                assert(len < io.umem.FRAME_SIZE);
+                assert((addr & 255) == 0 && ( addr - 256 & XSKUmem_FRAME_SIZE - 1) == 0);
+                assert(addr < XSKUmem_FRAME_SIZE * (io.umem.NUM_FRAMES - 1));
+                assert(len < XSKUmem_FRAME_SIZE);
 
                 u8* readAddr = static_cast<u8 *>(xsk_umem__get_data(io.umem.buffer, addr));
 

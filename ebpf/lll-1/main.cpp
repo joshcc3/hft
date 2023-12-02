@@ -309,10 +309,10 @@ public:
 
         assert(xskFD > 2);
         int sock_opt = 1;
-        // if (setsockopt(xskFD, SOL_SOCKET, SO_PREFER_BUSY_POLL,
-                       // (void *) &sock_opt, sizeof(sock_opt)) < 0) {
-            // perror("No busy poll");
-        // }
+        if (setsockopt(xskFD, SOL_SOCKET, SO_PREFER_BUSY_POLL,
+                       (void *) &sock_opt, sizeof(sock_opt)) < 0) {
+            perror("No busy poll");
+        }
         sock_opt = 100;
         if (setsockopt(xskFD, SOL_SOCKET, SO_BUSY_POLL,
                        (void *) &sock_opt, sizeof(sock_opt)) < 0) {
@@ -482,7 +482,7 @@ public:
         umemLoc->od.side = side;
 
         umemLoc->udp.check = 0;
-        umemLoc->udp.check = udp_csum(umemLoc->ip.saddr, umemLoc->ip.daddr, umemLoc->udp.len,
+        umemLoc->udp.check = tcpudp_csum(umemLoc->ip.saddr, umemLoc->ip.daddr, umemLoc->udp.len,
                                       IPPROTO_UDP, reinterpret_cast<u16 *>(&umemLoc->udp));
         // Send an all 0 checksum to indicate no checksum was calculated
         // umemLoc->udp.check = 0;

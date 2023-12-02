@@ -25,19 +25,16 @@ enum class StrategyState {
 
 class Driver {
 
-
     StrategyState state = StrategyState::INIT;
 
-    IOUringState ioState{true};
     int fileTable[1]{};
 
     XDPIO io{"lo", "/sys/fs/bpf/strat"};
     L2OB ob{};
-    OE oe{ioState, "lll-1.oe"};
+    OE oe{io, "lll-1.oe"};
     Strat strat{oe, ob, io};
 
 public:
-
 
     void run() {
         while (__builtin_expect(!strat.isComplete, true)) {
@@ -51,8 +48,6 @@ public:
                 }
                 case StrategyState::OE_CONNECT: {
                     assert(!oe.isConnected());
-                    assert(io_uring_sq_ready(&ioState.ring) == 0);
-                    assert(io_uring_cq_ready(&ioState.ring) == 0);
 
                     oe.establishConnection();
 
@@ -65,8 +60,6 @@ public:
                     break;
                 }
                 case StrategyState::RUNNING: {
-                    assert(io_uring_sq_ready(&ioState.ring) == 0);
-                    assert(!io_uring_cq_has_overflow(&ioState.ring));
                     assert(oe.isConnected());
 
                     static u64 prevCheckpoint = currentTimeNs();
@@ -75,10 +68,10 @@ public:
                     CLOCK(TOT_RECV_PC,
                             strat.recvUdpMD();
                     )
-                    const int modulus = 0;
+                    const int modulus = 0x1fff;
                     if(__builtin_expect((++counter1 & modulus) == 0, false)) {
 //                    if((++counter1 & modulus) == 0) {
-const TimeNs cTime = currentTimeNs();
+                        const TimeNs cTime = currentTimeNs();
                         cout << "Iters [" << counter1 << "]" << '\n';
                         cout << "Prev Avg Loop Time [" << (cTime - prevCheckpoint) / 1'000.0 / (modulus + 1) << "us]" << '\n';
                         cout << "Prev Time Spend [" << (GET_PC(0) - prevTimeSpent) * 1'000'000.0 / (modulus + 1) << "us]" << '\n';
@@ -93,31 +86,8 @@ const TimeNs cTime = currentTimeNs();
                     }
 //                    assert(std::abs(currentTimeNs() - strat.lastReceivedNs) < 10'000'000);
 
-                    if (u32 ready = io_uring_cq_ready(&ioState.ring)) {
-                        unsigned head;
-                        unsigned processed = 0;
-                        struct io_uring_cqe *cqe;
-                        io_uring_for_each_cqe(&ioState.ring, head, cqe) {
-                            assert(nullptr != cqe);
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "NullDereference"
-                            io_uring_cqe &e = *cqe;
-#pragma clang diagnostic pop
-                            const u64 userData = io_uring_cqe_get_data64(&e);
-                            if (userData >= OE::ORDER_TAG) {
-                                oe.completeMessage(e);
-                            } else {
-                                cerr << "Unexpected userdata [" << userData << "]";
-                                throw std::runtime_error("Unexpected");
-                                assert(false);
-                            }
-                            ++processed;
-                        }
-                        assert(processed >= ready);
-                        io_uring_cq_advance(&ioState.ring, processed);
-                    }
 
-                    assert(strat.isConnected() || !strat.isComplete);
+                    assert(strat.isConnected() || strat.isComplete);
                     break;
                 }
                 default: {
@@ -134,15 +104,11 @@ const TimeNs cTime = currentTimeNs();
         assert(strat.cursor == 0 || strat.isConnected());
         assert(strat.cursor == 0 || oe.isConnected());
         assert(strat.cursor == 0 || strat.lastReceivedNs > 0);
-        assert(ioState.ring.sq.ring_entries >= 256);
-        assert(ioState.ring.ring_fd > 2);
         switch (state) {
             case StrategyState::INIT: {
                 assert(!oe.isConnected());
                 assert(strat.cursor == 0);
                 assert(ob.seen.empty());
-                assert(io_uring_sq_ready(&ioState.ring) == 0);
-                assert(io_uring_cq_ready(&ioState.ring) == 0);
                 break;
             }
             case StrategyState::OE_CONNECT: {

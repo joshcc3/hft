@@ -172,3 +172,20 @@ Performance counter stats for './main':
        0.150176000 seconds user
        0.158956000 seconds sys
 
+
+by listening:
+sudo bpftrace -e 'kprobe:ip_rcv / (((struct net_device*)arg1)->name) == "lo" && comm != "DefaultDispatch" && comm != ".NET ThreadPool" && comm != "FrontendToBacke" / { printf("%s\n", comm); }' 
+
+and doing sudo tcpdump udp -i lo -n -X
+and bpftool prog trace log
+sudo bpftrace -e 'kprobe:ip_rcv / (((struct net_device*)arg1)->name) == "lo" && comm != "DefaultDispatch" && comm != ".NET ThreadPool" && comm != "FrontendToBacke" / { printf("%s\n", comm); }' 
+
+and doing sudo tcpdump udp -i lo -n -X
+and bpftool prog trace log
+
+we see the packet in the last two as well as ip_rcv. We do not see anything when we do udp_rcv though.
+use sudo bpftrace -e 'kprobe:kfree_skb_reason { printf("%s - %d\n", comm, arg1); }' to get the skb reason to see why the packet might be dropped.
+sudo bpftrace -e 'kprobe:ip_rcv / comm != "DefaultDispatch" && comm != ".NET ThreadPool" && comm != "FrontendToBacke" / { printf("%s - %d\n", comm, ((struct sk_buff*)arg0)->pkt_type); }'
+to get the packet type
+
+ethtool -S <interface name>, ip -s link

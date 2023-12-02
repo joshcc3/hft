@@ -58,8 +58,11 @@ add_executable(obtester
 )
 
 add_executable(xdp_test
-        ebpf/lll-1/main.cpp
-        ebpf/lll-1/defs.h
+        lowlatencylab/defs.h
+        lowlatencylab/client/XDPIO.cpp
+        lowlatencylab/client/XDPIO.h
+        lowlatencylab/client/TCPStack.cpp
+        lowlatencylab/client/TCPStack.h
 )
 
 target_link_libraries(networking uring)

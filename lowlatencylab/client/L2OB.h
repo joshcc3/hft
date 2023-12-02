@@ -44,7 +44,7 @@ struct LevelInfo {
     }
 
     void update(TimeNs t, Qty newQty) {
-        assert(newQty != levelQty);
+        // assert(newQty != levelQty);
         assert(t >= lastUpdated);
         lastUpdated = t;
         levelQty = newQty;
@@ -95,7 +95,7 @@ public:
     template<Side side>
     TopLevel
     update(bool isSnapshot, SideLevel &level, SideLevel &oppLevel, TimeNs localTimestamp, PriceL price, Qty qty) {
-        assert(oppLevel.empty() || isSnapshot || (side == Side::BUY) == (price <= oppLevel[0].price));
+        assert(oppLevel.empty() || isSnapshot || side == Side::BUY == price <= oppLevel[0].price);
         auto sideComp = [price](const LevelInfo &l) {
             if constexpr (side == Side::BUY) {
                 return price >= l.price;
@@ -112,7 +112,7 @@ public:
         auto iter = std::find_if(level.rbegin(), level.rend(), sideComp);
         assert(iter == level.rend() || sideComp(*iter) && iter->lastUpdated <= localTimestamp);
         assert(iter != level.rend() || level.empty() ||
-               (!sideComp(*(iter - 1)) || ((iter - 1)->price == price)) && (iter - 1)->lastUpdated <= localTimestamp);
+               (!sideComp(*(iter - 1)) || (iter - 1)->price == price) && (iter - 1)->lastUpdated <= localTimestamp);
 
         if (iter != level.rbegin()) {
             topLevel.bidSize = -1;
@@ -121,7 +121,7 @@ public:
 
         if (iter != level.rend() && iter->price == price) {
             assert(seen.find(price) != seen.end());
-            assert(qty != iter->levelQty);
+            // assert(qty != iter->levelQty);
             iter->update(localTimestamp, qty);
         } else {
             assert(seen.find(price) == seen.end() ||
@@ -150,7 +150,7 @@ public:
         auto it = std::find_if(level.begin(), level.end(), [price](const LevelInfo &l) { return l.price == price; });
         assert(it->price == price && it->levelQty == qty && it->lastUpdated == localTimestamp);
         assert(it == level.begin() || sideComp(*(it - 1)));
-        assert(it == (level.end() - 1) || !sideComp(*(it + 1)));
+        assert(it == level.end() - 1 || !sideComp(*(it + 1)));
 
         return true;
     }
@@ -190,12 +190,12 @@ public:
         assert(bid.size() + ask.size() == seen.size());
         if (!bid.empty() && !ask.empty()) {
             auto it = bid.begin();
-            while ((it + 1) != bid.end()) {
+            while (it + 1 != bid.end()) {
                 assert(it->price < (it + 1)->price);
                 ++it;
             }
             it = ask.begin();
-            while ((it + 1) != ask.end()) {
+            while (it + 1 != ask.end()) {
                 assert(it->price > (it + 1)->price);
                 ++it;
             }

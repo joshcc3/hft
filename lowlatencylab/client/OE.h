@@ -26,23 +26,22 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
+#include "XDPIO.h"
+
 class OE {
 public:
     // TODO Use POLLHUP to determine when the other end has hung up
 
     constexpr static u64 ORDER_TAG = 3;
 
-    IOUringState& ioState;
+
+    XDPIO& io;
     int clientFD = -1;
     OrderId orderId = 1;
 
     sockaddr_in serverAddr{};
 
-    static constexpr size_t msgSize = sizeof(Order);
-    char outputBuf[msgSize]{};
-    Order curOrder;
-
-    explicit OE(IOUringState& ioState, const std::string& oeHost) : ioState{ioState} {
+    explicit OE(XDPIO& io, const std::string& oeHost): io{io} {
         const addrinfo hints{
             .ai_family = AF_INET,
             .ai_socktype = SOCK_STREAM
@@ -85,15 +84,13 @@ public:
     void establishConnection() {
         assert(clientFD == -1);
         assert(orderId == 1);
-        assert(io_uring_sq_ready(&ioState.ring) == 0);
-        assert(io_uring_cq_ready(&ioState.ring) == 0);
 
         clientFD = socket(AF_INET, SOCK_STREAM, 0);
         if (clientFD == -1) {
             cerr << "Could not create oe server [" << errno << "]" << endl;
             exit(EXIT_FAILURE);
         }
-        assert(clientFD == 7); // assume that this is the second socket opened
+        assert(clientFD == 6); // assume that this is the second socket opened
 
         int enable = 1;
         if (setsockopt(clientFD, SOL_SOCKET, SO_DONTROUTE, &enable, sizeof(enable)) < 0) {
@@ -158,45 +155,81 @@ public:
         */
 
         assert(clientFD != -1);
-        assert(io_uring_sq_space_left(&ioState.ring) > 1);
-        assert(io_uring_sq_ready(&ioState.ring) == 0);
+
+
+        u8* outputBuf = io.getWriteBuff(sizeof(OrderFrame));
 
         TimeNs submitTime = currentTimeNs();
+        OrderFrame& frame = *reinterpret_cast<OrderFrame *>(outputBuf);
+
+        std::array<u8, ETH_ALEN> sourceMac = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
+        std::array<u8, ETH_ALEN> destMac = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
+        // std::array<u8, ETH_ALEN> destMac = {0x48, 0xd3, 0x43, 0xe9, 0x5c, 0xa0};
+        std::copy(sourceMac.begin(), sourceMac.end(), frame.eth.h_source);
+        std::copy(destMac.begin(), destMac.end(), frame.eth.h_dest);
+
+        frame.eth.h_proto = htons(ETH_P_IP);
+        frame.ip.ihl = 5;
+        frame.ip.version = 4;
+        frame.ip.tos = 0;
+        frame.ip.tot_len = htons(sizeof(OrderFrame) - sizeof(ethhdr));
+        frame.ip.id = orderId;
+        frame.ip.frag_off = 0x0;
+        frame.ip.ttl = static_cast<u8>(255);
+        frame.ip.protocol = 17;
+        frame.ip.check = 0;
+        constexpr u8 sourceIPBytes[4] = {127, 0, 0, 1};
+        constexpr u8 destIPBytes[4] = {127, 0, 0, 1};
+        const u32 sourceIP = *reinterpret_cast<const u32*>(sourceIPBytes);
+        const u32 destIP = *reinterpret_cast<const u32*>(destIPBytes);
+        frame.ip.saddr = sourceIP;
+        frame.ip.daddr = destIP;
+        const u8* dataptr = reinterpret_cast<u8 *>(&frame.ip);
+        const u16 kernelcsum = ip_fast_csum(dataptr, frame.ip.ihl);
+        frame.ip.check = kernelcsum;
 
 
-        Order& o = *reinterpret_cast<Order *>(outputBuf);
-        o.packetType = 2;
-        o.submittedTime = submitTime;
-        o.triggerEvent = triggerEvent;
-        o.triggerReceivedTime = triggerRecvTime;
-        o.id = orderId++;
-        o.price = price;
-        o.qty = qty;
-        o.flags = flags;
+        assert(frame.ip.check != 0);
+        assert(frame.eth.h_proto == htons(ETH_P_IP));
+        assert(frame.ip.frag_off == 0);
+        assert(frame.ip.ttl != 0);
+        assert(frame.ip.protocol == 17);
+        assert(frame.ip.tot_len == (htons(sizeof(OrderFrame) - sizeof(ethhdr))));
 
-        assert(o.submittedTime == submitTime);
-        assert(o.triggerEvent == triggerEvent);
-        assert(o.triggerReceivedTime == triggerRecvTime);
-        assert(o.id == orderId - 1);
-        assert(o.price == price);
-        assert(o.qty == qty);
 
-        io_uring_sqe* submitSqe = ioState.getSqe(o.id + ORDER_TAG);
-        int sendFlags = MSG_DONTROUTE | MSG_DONTWAIT;
-        io_uring_prep_send(submitSqe, clientFD, outputBuf, msgSize, sendFlags);
-        assert(submitSqe->flags == 0);
 
-        assert(io_uring_sq_ready(&ioState.ring) == 1);
+        constexpr int udpPacketSz = sizeof(OrderFrame) - sizeof(ethhdr) - sizeof(iphdr);
+        frame.udp.len = htons(udpPacketSz);
+        frame.udp.check = 0;
+        frame.udp.dest = htons(OE_PORT);
+        frame.udp.source = htons(1234);
 
-        assert((ioState.ring.sq.kflags & IORING_SQ_NEED_WAKEUP) == 0);
+
+        frame.o.packetType = OE_PACKET_TYPE;
+        frame.o.submittedTime = submitTime;
+        frame.o.triggerEvent = triggerEvent;
+        frame.o.triggerReceivedTime = triggerRecvTime;
+        frame.o.id = orderId++;
+        frame.o.price = price;
+        frame.o.qty = qty;
+        frame.o.flags = flags;
+
+        frame.udp.check = 0;
+        // frame.udp.check = udp_csum(umemLoc->ip.saddr, umemLoc->ip.daddr, umemLoc->udp.len,
+                                      // IPPROTO_UDP, reinterpret_cast<u16 *>(&umemLoc->udp));
+
+        assert(frame.o.submittedTime == submitTime);
+        assert(frame.o.triggerEvent == triggerEvent);
+        assert(frame.o.triggerReceivedTime == triggerRecvTime);
+        assert(frame.o.id == orderId - 1);
+        assert(frame.o.price == price);
+        assert(frame.o.qty == qty);
+
 
         CLOCK(ORDER_SUBMISSION_PC,
-              int submits = io_uring_submit(&ioState.ring);
+            io.triggerWrite();
+            io.complete();
         )
-        assert(io_uring_sq_ready(&ioState.ring) == 0);
-        assert(submits == 1);
-
-        curOrder = o;
 
         assert(isConnected());
     }
@@ -214,36 +247,6 @@ public:
         }
     }
 
-    void completeMessage(io_uring_cqe& completion) {
-        auto curTime = currentTimeNs();
-
-        assert(io_uring_cq_ready(&ioState.ring) >= 1);
-        assert(clientFD > 2);
-        assert(orderId > 1);
-        assert(curOrder.id >= 1);
-
-        i32 cRes = completion.res;
-        u32 cFlags = completion.flags;
-        u64 cUserData = io_uring_cqe_get_data64(&completion);
-
-        OrderId receivedId = cUserData - ORDER_TAG;
-
-        if (receivedId == curOrder.id) {
-            if (cRes <= 0) {
-                cerr << "Unexpected error code [" << cRes << "]" << endl;
-                throw std::runtime_error("Unexpected");
-            }
-            assert(cRes > 0);
-            assert(!(cFlags & IORING_CQE_F_BUFFER));
-            assert(!(cFlags & IORING_CQE_F_NOTIF));
-
-            // id, latency time,
-            //            cout << curOrder.id << "," << double(curTime - curOrder.triggerReceivedTime) / 1000.0 << ","
-            //                 << double(curTime - curOrder.submittedTime) / 1000.0 << '\n';
-        } else {
-            //            cout << "Skipping [" << receivedId << "]." << '\n';
-        }
-    }
 };
 
 #endif //LLL_EXCHANGE_OE_H
