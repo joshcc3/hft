@@ -102,11 +102,16 @@ public:
             const TimeNs timeDelay = currentTimeNs() - packet.localTimestamp;
             // assert(timeDelay <= 5'000'000'000);
             assert(packet.packetType == MD_PACKET_TYPE);
-            assert(packet.seqNo >= 0 || packet.flags.isTerm);
-            assert(packet.price > 0);
-            assert(packet.qty >= 0);
-            const int processed = udpBuf.newMessage(time, packet, *this);
-            assert(processed > 0);
+            if(__builtin_expect(!packet.flags.isTerm, true)) {
+                assert(packet.seqNo >= 0 || packet.flags.isTerm);
+                assert(packet.price > 0);
+                assert(packet.qty >= 0);
+                const int processed = udpBuf.newMessage(time, packet, *this);
+                assert(processed > 0);
+            } else {
+                assert(i == numPackets - 1);
+                isComplete = true;
+            }
             finalBufPos += sizeof(MDPacket);
         }
 

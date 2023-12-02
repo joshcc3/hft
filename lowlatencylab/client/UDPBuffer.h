@@ -85,6 +85,7 @@ struct UDPBuffer {
         assert(head < Sz);
         assert(nextMissingSeqNo >= 0);
         assert(mask != ONES);
+
         assert(seqNo >= nextMissingSeqNo);
         u32 bufferOffs = seqNo - nextMissingSeqNo;
         int totalPacketsProccessed = -1;
