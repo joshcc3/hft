@@ -162,8 +162,8 @@ public:
         TimeNs submitTime = currentTimeNs();
         OrderFrame& frame = *reinterpret_cast<OrderFrame *>(outputBuf);
 
-        std::array<u8, ETH_ALEN> sourceMac = {0x3c, 0xe9, 0xf7, 0xfe, 0xdf, 0x6c};
-        std::array<u8, ETH_ALEN> destMac = {0x3c, 0xe9, 0xf7, 0xfe, 0xdf, 0x6c};
+        std::array<u8, ETH_ALEN> sourceMac = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
+        std::array<u8, ETH_ALEN> destMac = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
         // std::array<u8, ETH_ALEN> destMac = {0x48, 0xd3, 0x43, 0xe9, 0x5c, 0xa0};
         std::copy(sourceMac.begin(), sourceMac.end(), frame.eth.h_source);
         std::copy(destMac.begin(), destMac.end(), frame.eth.h_dest);

@@ -22,6 +22,8 @@ add_executable(lll_strategy
         lowlatencylab/client/Strat.h
         lowlatencylab/client/XDPIO.cpp
         lowlatencylab/client/XDPIO.h
+        lowlatencylab/client/TCPStack.cpp
+        lowlatencylab/client/TCPStack.h
 )
 
 add_executable(cubist
