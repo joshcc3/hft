@@ -67,13 +67,13 @@ public:
                     static u64 prevCheckpoint = currentTimeNs();
                     static double prevTimeSpent = timeSpent[0];
                     static int counter1 = 0;
-                    // CLOCK(TOT_RECV_PC,
+                    CLOCK(TOT_RECV_PC,
                             strat.recvUdpMD();
-                    // )
-                    const int modulus = 0x1ffff;
+                    )
+                    const int modulus = 0x1fff;
                     if(__builtin_expect((++counter1 & modulus) == 0, false)) {
 //                    if((++counter1 & modulus) == 0) {
-const TimeNs cTime = currentTimeNs();
+                        const TimeNs cTime = currentTimeNs();
                         cout << "Iters [" << counter1 << "]" << '\n';
                         cout << "Prev Avg Loop Time [" << (cTime - prevCheckpoint) / 1'000.0 / (modulus + 1) << "us]" << '\n';
                         cout << "Prev Time Spend [" << (GET_PC(0) - prevTimeSpent) * 1'000'000.0 / (modulus + 1) << "us]" << '\n';
