@@ -238,7 +238,7 @@ private:
 
 int main() {
     const string &ofname = "data/trades_500M.csv";
-    // const string &fname = "data/deribit_incremental_book_L2_2019-07-01_BTC-PERPETUAL.csv.gz";
+    //const string &fname = "data/deribit_incremental_book_L2_2019-07-01_BTC-PERPETUAL.csv.gz";
     const string &fname = "data/l2_mine.csv.gz";
     std::ifstream ifile(fname, std::ios_base::in | std::ios_base::binary);
     if (!ifile) {

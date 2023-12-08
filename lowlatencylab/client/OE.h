@@ -214,7 +214,7 @@ public:
         }
     }
 
-    void completeMessage(io_uring_cqe& completion) {
+    void completeMessage(io_uring_cqe& completion) const {
         auto curTime = currentTimeNs();
 
         assert(io_uring_cq_ready(&ioState.ring) >= 1);

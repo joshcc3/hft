@@ -69,6 +69,7 @@ int strat(struct xdp_md *ctx)
       return XDP_PASS;
     }
 
+    bpf_printk("Ignoring IP");
     return XDP_PASS;
   }
 }
