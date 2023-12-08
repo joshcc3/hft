@@ -38,21 +38,31 @@ public:
                                          io{io} {
     }
 
-    template<Side side>
+    template<Side side, bool IsReal = true>
     void __attribute__((always_inline))
     checkTrade(SeqNo seqNo, TimeNs mdTime, bool isSnapshot, TimeNs localTimestamp,
                PriceL price,
                Qty qty) {
-        const auto& [bestBid, bestAsk, bidSize, askSize] = ob.update(isSnapshot, side, localTimestamp, price, qty);
-        if (__builtin_expect(!isSnapshot, true)) {
-            const SeqNo triggerEvent = seqNo;
-            const TimeNs recvTime = mdTime;
-            const Qty tradeQty = 1;
+        TopLevel t;
+        CLOCK(BOOK_UPDATE_PC,
+              t = ob.update<IsReal>(isSnapshot, side, localTimestamp, price, qty);
+        )
+        const auto& [bestBid, bestAsk, bidSize, askSize] = t;
+        const SeqNo triggerEvent = seqNo;
+        const TimeNs recvTime = mdTime;
+        constexpr Qty tradeQty = 1;
+        constexpr bool isBid = side == BUY;
 
+        if constexpr (!IsReal) {
+            const OrderFlags flags{.isBid = !isBid};
+            orderEntry.submit<IsReal>(triggerEvent, recvTime, price, qty, flags);
+            return;
+        }
+
+        if (__builtin_expect(!isSnapshot, true)) {
             PriceL sidePrice;
             PriceL oppSidePrice;
             Qty sideQty;
-            constexpr bool isBid = side == BUY;
 
             if constexpr (side == BUY) {
                 sidePrice = bestBid;
@@ -71,16 +81,17 @@ public:
                 if (notionalChange > TRADE_THRESHOLD) {
                     const PriceL tradePrice = oppSidePrice;
                     const OrderFlags flags{.isBid = !isBid};
-                    orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
+                    orderEntry.submit<true>(triggerEvent, recvTime, tradePrice, tradeQty, flags);
                 } else if (notionalChange < -TRADE_THRESHOLD) {
                     const PriceL tradePrice = sidePrice;
                     const OrderFlags flags{.isBid = isBid};
-                    orderEntry.submit(triggerEvent, recvTime, tradePrice, tradeQty, flags);
+                    orderEntry.submit<true>(triggerEvent, recvTime, tradePrice, tradeQty, flags);
                 }
             }
         }
     }
 
+    template<bool IsReal = true>
     const u8* handleMessages(const u8* inBuf, u64 numPackets, TimeNs time) {
         assert(!isComplete);
         assert(inBuf != nullptr);
@@ -96,35 +107,42 @@ public:
         const u32 ogHead = udpBuf.head;
 
         const u8* finalBufPos = inBuf;
-
         for (int i = 0; i < numPackets; ++i) {
-            const MDPacket& packet = *reinterpret_cast<const MDPacket *>(finalBufPos);
+            const MDPayload& packet = *reinterpret_cast<const MDPayload *>(finalBufPos);
             const TimeNs timeDelay = currentTimeNs() - packet.localTimestamp;
             // assert(timeDelay <= 5'000'000'000);
             assert(packet.packetType == MD_PACKET_TYPE);
-            if(__builtin_expect(!packet.flags.isTerm, true)) {
+            if (__builtin_expect(!packet.flags.isTerm, true)) {
                 assert(packet.seqNo >= 0 || packet.flags.isTerm);
                 assert(packet.price > 0);
                 assert(packet.qty >= 0);
-                const int processed = udpBuf.newMessage(time, packet, *this);
-                assert(processed > 0);
+                if constexpr (IsReal) {
+                    const int processed = udpBuf.newMessage<true>(time, packet, *this);
+                    assert(processed > 0);
+                } else {
+                    const int processed = udpBuf.newMessage<false>(time, packet, *this);
+                    assert(processed == 0);
+                }
             } else {
                 assert(i == numPackets - 1);
                 isComplete = true;
             }
-            finalBufPos += sizeof(MDPacket);
+            finalBufPos += sizeof(MDPayload);
         }
 
         assert(udpBuf.nextMissingSeqNo >= ogLowestSeqNum);
         assert(udpBuf.nextMissingSeqNo == ogLowestSeqNum || udpBuf.head != ogHead);
-        assert(finalBufPos - inBuf == numPackets * sizeof(MDPacket));
+        assert(finalBufPos - inBuf == numPackets * sizeof(MDPayload));
 
         return finalBufPos;
     }
 
-    void processPacket(TimeNs time, const MDPacket& p) {
+    template<bool IsReal>
+    void processPacket(TimeNs time, const MDPayload& p) {
         assert(!isComplete);
         isComplete = p.flags.isTerm;
+
+
         if (__builtin_expect(!isComplete, true)) {
             assert(p.seqNo > -1);
             assert(p.seqNo > lastReceivedSeqNo);
@@ -138,6 +156,11 @@ public:
             const Qty qty = p.qty;
             const bool isSnapshot = p.flags.isSnapshot;
 
+            if constexpr (!IsReal) {
+                checkTrade<BUY, false>(lastReceivedSeqNo + 1, time, false, time, price, qty);
+                return;
+            }
+
             if (qty > 0) {
                 static bool isSnapshotting = false;
                 if (!isSnapshotting && isSnapshot) {
@@ -145,9 +168,9 @@ public:
                 }
                 isSnapshotting = isSnapshot;
                 if (p.flags.isBid) {
-                    checkTrade<BUY>(seqNo, time, isSnapshot, localTimestamp, price, qty);
+                    checkTrade<BUY, IsReal>(seqNo, time, isSnapshot, localTimestamp, price, qty);
                 } else {
-                    checkTrade<SELL>(seqNo, time, isSnapshot, localTimestamp, price, qty);
+                    checkTrade<SELL, IsReal>(seqNo, time, isSnapshot, localTimestamp, price, qty);
                 }
             } else {
                 CLOCK(BOOK_UPDATE_PC,
@@ -160,9 +183,11 @@ public:
         }
     }
 
-    void recvUdpMD() {
+    template<bool IsReal>
+    ErrorCode recvUdpMD(const u8* frameBuffer, u32 len) {
         assert(!udpBuf.test(0));
         assert(orderEntry.isConnected());
+        assert(frameBuffer != nullptr);
 
         const UDPBuffer<Strat>::MaskType ogMask = udpBuf.mask;
         const SeqNo ogSeqNo = udpBuf.nextMissingSeqNo;
@@ -171,93 +196,49 @@ public:
         const bool isAlive = isConnected();
 
         if (__builtin_expect(isAlive, true)) {
-            io.qs.stateCheck();
-            io.umem.stateCheck();
-            io.socket.stateCheck();
+            const auto curTime = currentTimeNs();
 
-            u32 idx;
-            u32 available;
-            u32 fillQIdx;
-            u32 reserved;
-            CLOCK(SYS_RECV_PC,
-                  // if we get multiple out of order packets then we should process them smartly - last to first.
-                  const auto& res = io.blockRecv();
-                  available = std::get<0>(res);
-                  reserved = std::get<1>(res);
-                  idx = std::get<2>(res);
-                  fillQIdx = std::get<3>(res);
-            )
-            assert(reserved == available);
+            const i64 bytesReadWithPhy = len;
 
-            for (int i = 0; i < available; ++i) {
-                const auto curTime = currentTimeNs();
+            assert(bytesReadWithPhy > 0);
+            assert(bytesReadWithPhy <= READ_BUF_SZ);
 
-                const xdp_desc* readDesc = xsk_ring_cons__rx_desc(&io.qs.rxQ, idx + i);
-                const __u64 addr = readDesc->addr;
-                const __u32 len = readDesc->len;
-                const __u32 options = readDesc->options;
+            assert((reinterpret_cast<u64>(frameBuffer) & 127) == 0);
+            const auto* packet = reinterpret_cast<const MDFrame *>(frameBuffer);
+            assert(packet->eth.h_proto == htons(ETH_P_IP));
+            assert(packet->ip.version == 4);
+            assert(packet->ip.ihl == 5);
+            assert(htons(packet->ip.tot_len) == bytesReadWithPhy - sizeof(ethhdr));
+            assert((htons(packet->ip.tot_len) - sizeof(iphdr) - sizeof(udphdr)) % sizeof(MDPayload) == 0);
+            assert((ntohs(packet->ip.frag_off) & 0x1fff) == 0);
+            assert(((packet->ip.frag_off >> 13) & 1) == 0);
+            assert(((packet->ip.frag_off >> 15) & 1) == 0);
+            assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
 
-                assert(xsk_umem__extract_addr(addr) == addr);
-                assert(xsk_umem__extract_offset(addr) == 0);
-                assert(options == 0);
-                assert((u64(io.umem.buffer) & 4095) == 0);
-                assert((addr & 255) == 0 && ( addr - 256 & XSKUmem_FRAME_SIZE - 1) == 0);
-                assert(addr < XSKUmem_FRAME_SIZE * (io.umem.NUM_FRAMES - 1));
-                assert(len < XSKUmem_FRAME_SIZE);
+            const u8* dataBuf = frameBuffer + sizeof(MDFrame);
+            u32 bytesRead = bytesReadWithPhy - sizeof(MDFrame);
 
-                u8* readAddr = static_cast<u8 *>(xsk_umem__get_data(io.umem.buffer, addr));
+            const u64 numPackets = bytesRead / sizeof(MDPayload);
+            assert(bytesRead % sizeof(MDPayload) == 0);
 
-                assert(readAddr == io.umem.buffer + addr);
-
-
-                const u8* inBuf = readAddr;
-                u32 bytesReadWithPhy = len;
-                assert(inBuf != nullptr);
-
-                assert(bytesReadWithPhy > 0);
-                assert(bytesReadWithPhy <= READ_BUF_SZ);
-
-                assert((reinterpret_cast<u64>(inBuf) & 127) == 0);
-                const MDFrame* packet = reinterpret_cast<const MDFrame *>(inBuf);
-                assert(packet->eth.h_proto == htons(ETH_P_IP));
-                assert(packet->ip.version == 4);
-                assert(packet->ip.ihl == 5);
-                assert(htons(packet->ip.tot_len) == bytesReadWithPhy - sizeof(ethhdr));
-                assert((htons(packet->ip.tot_len) - sizeof(iphdr) - sizeof(udphdr)) % sizeof(MDPacket) == 0);
-                //assert((packet->ip.frag_off & 0x1fff) == 0);
-                assert(((packet->ip.frag_off >> 13) & 1) == 0);
-                assert(((packet->ip.frag_off >> 15) & 1) == 0);
-                assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
-
-                const u8* dataBuf = inBuf + sizeof(MDFrame);
-                u32 bytesRead = bytesReadWithPhy - sizeof(MDFrame);
-
-                const u64 numPackets = bytesRead / sizeof(MDPacket);
-                assert(bytesRead % sizeof(MDPacket) == 0);
-
+            if constexpr (IsReal) {
                 assert(checkMessageDigest(dataBuf, bytesRead));
-
-                const u8* endBuf = handleMessages(dataBuf, numPackets, curTime);
-                assert(endBuf == dataBuf + sizeof(MDPacket) * numPackets);
-
-
-                const TimeNs now = currentTimeNs();
-                // assert(lastReceivedNs == 0 || now - lastReceivedNs < 100'000'000);
-                lastReceivedNs = now;
-
-                unsigned long long* fillQEntry = xsk_ring_prod__fill_addr(&io.qs.fillQ, fillQIdx + i);
-                assert(fillQEntry != nullptr);
-                *fillQEntry = readDesc->addr;
             }
+            const u8* endBuf = handleMessages<IsReal>(dataBuf, numPackets, curTime);
+            assert(endBuf == dataBuf + sizeof(MDPayload) * numPackets);
 
-            assert(!xsk_ring_prod__needs_wakeup(&io.qs.fillQ));
-            xsk_ring_cons__release(&io.qs.rxQ, available);
-            xsk_ring_prod__submit(&io.qs.fillQ, available);
+
+            const TimeNs now = currentTimeNs();
+            // assert(lastReceivedNs == 0 || now - lastReceivedNs < 100'000'000);
+            lastReceivedNs = now;
+
 
             assert(!udpBuf.test(0));
             assert(ogSeqNo == udpBuf.nextMissingSeqNo || cursor > ogCursor && (ogMask == 0 || ogMask != udpBuf.mask));
             assert(cursor >= ogCursor);
         }
+        // TODO - translate some assertions to error codes
+        return {};
     }
 
     [[nodiscard]] bool isConnected() const noexcept {

@@ -28,8 +28,10 @@
 #include <netinet/ip.h>
 #include <array>
 #include <dirent.h>
+#include <netinet/tcp.h>
 
-// #define NDEBUG
+
+#define NDEBUG
 
 #ifdef NDEBUG
 #undef assert
@@ -99,6 +101,39 @@ struct OrderFlags {
     bool isBid: 1;
 };
 
+struct ErrorCode {
+    u8 IP_PROTO: 1;
+    u8 TCP_RECV_SYN: 1;
+    u8 TCP_RECV_OLD_SEQ: 1;
+    u8 TCP_RECV_ACK: 1;
+    u8 TCP_RECV_WINDOW: 1;
+    u8 TCP_RECV_IS_RST: 1;
+    u8 TCP_RECV_UNEXPECTED_ACK: 1;
+
+    void clear() {
+        *reinterpret_cast<u8 *>(this) = 0;
+    }
+
+    [[nodiscard]] bool isErr() const {
+        return *reinterpret_cast<const u8 *>(this);
+    }
+
+    [[nodiscard]] u8 getBitRep() const {
+        static_assert(sizeof(ErrorCode) == 1);
+        return *reinterpret_cast<const u8 *>(this);
+    }
+
+    void append(const ErrorCode& e) {
+        *reinterpret_cast<u8 *>(this) |= e.getBitRep();
+    }
+} __attribute__((packed));
+
+inline void logErrAndExit(const ErrorCode& err) {
+    printf("Error while receiving data [0x%x]\n", err.getBitRep());
+    assert(false);
+}
+
+
 struct Order {
     u8 packetType{OE_PACKET_TYPE};
     u8 _padding[5]{};
@@ -124,12 +159,20 @@ struct Order {
     }
 } __attribute__((packed));
 
-struct OrderFrame {
-    ethhdr eth{};
-    iphdr ip{};
-    udphdr udp{};
-    Order o{};
-} __attribute__((packed));
+template<typename T>
+struct PacketHdr {
+    ethhdr eth;
+    iphdr ip;
+    tcphdr tcp;
+    T data;
+
+    [[nodiscard]] u32 dataSz() const {
+        return ntohs(ip.tot_len) - ip.ihl * 4 - tcp.doff * 4;
+    }
+} __attribute((packed));
+
+
+using OrderFrame = PacketHdr<Order>;
 
 
 struct OrderInfo {
@@ -182,8 +225,8 @@ struct IOUringState {
     std::array<int, FILE_TABLE_SZ> fileTable{};
     io_uring ring{};
 
-    IOUringState(bool enableSQPoll) {
-        io_uring_params params;
+    explicit IOUringState(bool enableSQPoll) {
+        io_uring_params params{};
 
         if (enableSQPoll) {
             params = {
@@ -225,7 +268,7 @@ struct IOUringState {
             // Wait for process completion to finish
             usleep(100'000);
             // Wait for sq-poll to be scheduled
-            pid_t mainTID = syscall(SYS_gettid);
+            auto mainTID = static_cast<pid_t>(syscall(SYS_gettid));
             pid_t guessedSQPollTID = -1;
 
 
@@ -263,8 +306,8 @@ struct IOUringState {
             cout << "Kernel SQ Poll Thread [" << guessedSQPollTID << "] [" << comm << "]." << endl;
 
             sched_param schparam{};
-            const int receiveThreadPolicy = SCHED_FIFO;
-            const int priority = 99; // sched_get_priority_max(receiveThreadPolicy);
+            constexpr int receiveThreadPolicy = SCHED_FIFO;
+            constexpr int priority = 99; // sched_get_priority_max(receiveThreadPolicy);
             schparam.sched_priority = priority;
             if (sched_setscheduler(guessedSQPollTID, receiveThreadPolicy, &schparam)) {
                 cerr << "Error [" << errno << " in setting priority: " << strerror(errno) << endl;
@@ -307,6 +350,7 @@ struct IOUringState {
         int res = io_uring_wait_cqe(&ring, &cqe);
         assert(res == 0);
         u64 tag = io_uring_cqe_get_data64(cqe);
+        // ReSharper disable once CppUnsignedZeroComparison
         assert(tag >= 0);
 
         return cqe;
@@ -319,26 +363,27 @@ struct MDFlags {
     bool isTerm: 1;
 };
 
-struct MDPacket {
+struct MDPayload {
     static_assert(sizeof(MDFlags) == 1);
     u8 packetType{MD_PACKET_TYPE};
-    char _padding[5];
+    char _padding[5]{};
     SeqNo seqNo = -1;
     TimeNs localTimestamp = 0;
     PriceL price = 0;
     Qty qty = 0;
     MDFlags flags{.isTerm = true};
+    char _padding2[5]{};
 
-    MDPacket() = default;
+    MDPayload() = default;
 
-    MDPacket(SeqNo seqNo, TimeNs localTimestamp, PriceL price, Qty qty, MDFlags flags) : seqNo{seqNo},
+    MDPayload(SeqNo seqNo, TimeNs localTimestamp, PriceL price, Qty qty, MDFlags flags) : seqNo{seqNo},
         localTimestamp{localTimestamp},
         price{price}, qty{qty},
         flags{flags}, _padding{} {
     }
 
-    MDPacket(const MDPacket& other) = default;
-};
+    MDPayload(const MDPayload& other) = default;
+} __attribute__((packed));
 
 struct MDFrame {
     ethhdr eth;
@@ -349,6 +394,7 @@ struct MDFrame {
 inline bool operator==(const IOUringState& s1, const IOUringState& s2) {
     return &s1 == &s2;
 }
+
 
 struct cqe_guard {
     io_uring_cqe* completion;
@@ -371,7 +417,7 @@ inline constexpr int MCAST_PORT = 12345;
 inline std::string MD_UNICAST_HOSTNAME = "lll-1.md.client";
 inline constexpr uint16_t MD_UNICAST_PORT = 4321;
 
-inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 500'000'000;
+inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 3'000'000'000;
 
 
 inline int parseDeribitMDLine(const char* msg, TimeNs& timestamp, TimeNs& localTimestamp, bool& isSnapshot, Side& side,
@@ -441,8 +487,8 @@ inline int parseDeribitMDLine(const char* msg, TimeNs& timestamp, TimeNs& localT
 
 
 inline bool checkMessageDigest(const u8* buf, ssize_t bytes) {
-    static std::unordered_map<int, MDPacket> seenHashes{};
-    const MDPacket& p = *reinterpret_cast<const MDPacket *>(buf);
+    static std::unordered_map<int, MDPayload> seenHashes{};
+    const MDPayload& p = *reinterpret_cast<const MDPayload *>(buf);
 
     const auto& [e, inserted] = seenHashes.emplace(p.seqNo, p);
 
@@ -463,20 +509,20 @@ static unsigned int do_csum(const unsigned char* buff, int len) {
     unsigned int result = 0;
 
     assert(len == 20);
-    assert(((unsigned long)buff & 0xf) == 0xe);
+    assert((reinterpret_cast<unsigned long>(buff) & 0xf) == 0xe);
 
-    if (2 & (unsigned long) buff) {
+    if (2 & reinterpret_cast<unsigned long>(buff)) {
         result += *(unsigned short *) buff;
         len -= 2;
         buff += 2;
     }
     assert(len >= 4);
 
-    const unsigned char* end = buff + ((unsigned) len & ~3);
+    const unsigned char* end = buff + (static_cast<unsigned>(len) & ~3);
     unsigned int carry = 0;
 
     do {
-        unsigned int w = *(unsigned int *) buff;
+        const auto w = *(unsigned int *) buff;
         buff += 4;
         result += carry;
         result += w;

@@ -74,15 +74,15 @@ int strat(struct xdp_md *ctx)
     }
 
     if(p->ip.protocol == 17 && p->packetType == 1 && p->udp.dest == htons(MD_UNICAST_PORT)) {
-	    bpf_printk("Forwarding MD");
+	    bpf_printk("Forwarding Non IP %d", p->eth.h_proto);
       return bpf_redirect_map(&redirMap, 0, XDP_PASS);
     } else if(p->udp.dest == htons(MD_UNICAST_PORT)) {
       bpf_printk("Malformed udp packet to md unicast port");
       return XDP_PASS;
     }
 
-    if((data + sizeof(struct TCPPacket)) < data_end && p->ip.protocol == 6 && oe->tcp.source == htons(OE_PORT)) {
-	  bpf_printk("Forwarding unclassified ip proto: %d, source: %d", p->ip.protocol, htons(oe->tcp.source));
+    if((data + sizeof(struct TCPPacket)) <= data_end && p->ip.protocol == 6 && oe->tcp.source == htons(OE_PORT)) {
+	  bpf_printk("Forwarding oe ip proto: %d, source: %d", p->ip.protocol, htons(oe->tcp.source));
       return bpf_redirect_map(&redirMap, 0, XDP_PASS);
     }
 

@@ -127,7 +127,11 @@ ip netns exec ns1 ./xdpsock -t -i veth1 -S -c -G 00:00:00:00:00:02 -H 00:00:00:0
 When running a bpf program in a namespace - pinning doesn't work because ip netns exec mounts and unmounts bpf every time its called.
 remember to load and attach your program from within the namespace and call trace log from within the namespace as well.
 
-netns exec ns1 bash -c  "bpftool net detach xdpgeneric dev veth1 && bpftool prog load /home/joshuacoutinho/CLionProjects/hft/lowlatencylab/client/bpf/strat.bpf.o /sys/fs/bpf/strat && bpftool net attach xdpgeneric name strat dev veth1 && /home/joshuacoutinho/CLionProjects/hft/cmake-build-debug/xdp_test
+netns exec ns1 bash -c  "bpftool prog pin name strat /home/joshuacoutinho/CLionProjects/hft/lowlatencylab/client/bpf/strat.bpf.o /sys/fs/bpf/strat && /home/joshuacoutinho/CLionProjects/hft/cmake-build-debug/lll_strategy 
+netns exec ns1 bash -c  "bpftool net detach xdpdrv dev veth1 && bpftool prog load /home/joshuacoutinho/CLionProjects/hft/lowlatencylab/client/bpf/strat.bpf.o /sys/fs/bpf/strat && bpftool net attach xdpdrv name strat dev veth1 && /home/joshuacoutinho/CLionProjects/hft/cmake-build-debug/lll_strategy
+netns exec ns1 bash -c  "bpftool net detach xdpdrv dev veth1 && bpftool prog load /home/joshuacoutinho/CLionProjects/hft/lowlatencylab/client/bpf/strat.bpf.o /sys/fs/bpf/strat && bpftool net attach xdpdrv name strat dev veth1 && /home/joshuacoutinho/CLionProjects/hft/cmake-build-debug/lll_strategy
+
+netns exec ns2 /home/joshuacoutinho/CLionProjects/hft/cmake-build-debug/lll_exchange
 
 Nice guide on kernel debugging:
 https://blog.cloudflare.com/a-story-about-af-xdp-network-namespaces-and-a-cookie/
@@ -135,3 +139,7 @@ https://blog.cloudflare.com/a-story-about-af-xdp-network-namespaces-and-a-cookie
 
 
 https://git.esa.informatik.tu-darmstadt.de/net/100-gbps-fpga-tcp-ip-stack
+
+
+notes on device drivers
+https://www.privateinternetaccess.com/blog/linux-networking-stack-from-the-ground-up-part-2/

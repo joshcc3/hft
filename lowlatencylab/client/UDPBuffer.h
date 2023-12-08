@@ -20,9 +20,9 @@
 
 template<typename Derived>
 struct PacketProcessor {
-
-    void operator()(TimeNs t, const MDPacket &p) {
-        static_cast<Derived *>(this)->processPacket(t, p);
+    template<bool IsReal>
+    void operator()(TimeNs t, const MDPayload& p) {
+        static_cast<Derived *>(this)->template processPacket<IsReal>(t, p);
     }
 };
 
@@ -36,12 +36,12 @@ struct UDPBuffer {
     static_assert(Sz == 64);
     static_assert(ONES == 0xFFFFFFFFFFFFFFFF);
 
-    using BufferItem = MDPacket;
+    using BufferItem = MDPayload;
     MaskType mask = 0;
     SeqNo nextMissingSeqNo = 0;
     u32 head = 0;
     std::array<BufferItem, Sz> ringBuffer{};
-    RingBuffer<MDPacket, UNPROCESSED_SZ> unprocessed;
+    RingBuffer<MDPayload, UNPROCESSED_SZ> unprocessed;
 
     [[nodiscard]] bool stateCheck() const {
         assert(head >= 0 && head < Sz);
@@ -57,7 +57,7 @@ struct UDPBuffer {
             }
         }
         for (int i = 0; i < unprocessed.size(); ++i) {
-            const auto &packet = unprocessed.get(i);
+            const auto& packet = unprocessed.get(i);
             assert(packet.seqNo != -1);
             assert(packet.seqNo - nextMissingSeqNo - Sz < UNPROCESSED_SZ);
         }
@@ -65,7 +65,7 @@ struct UDPBuffer {
         return true;
     }
 
-    [[nodiscard]] const MDPacket &get(int i) const {
+    [[nodiscard]] const MDPayload& get(int i) const {
         assert(i >= 0 && i < Sz);
         u32 bufferIx = (head + i) & (Sz - 1);
         assert((mask >> bufferIx) & 1);
@@ -78,21 +78,28 @@ struct UDPBuffer {
     }
 
 
-    int newMessage(TimeNs time, const MDPacket &msg, PP &packetProcessor) {
+    template<bool isReal>
+    int newMessage(TimeNs time, const MDPayload& msg, PP& packetProcessor) {
         SeqNo seqNo = msg.seqNo;
+        if (isReal) {
+            assert(stateCheck());
+            assert(head < Sz);
+            assert(nextMissingSeqNo >= 0);
+            assert(mask != ONES);
 
-        assert(stateCheck());
-        assert(head < Sz);
-        assert(nextMissingSeqNo >= 0);
-        assert(mask != ONES);
-
-        assert(seqNo >= nextMissingSeqNo);
+            assert(seqNo >= nextMissingSeqNo);
+        }
         u32 bufferOffs = seqNo - nextMissingSeqNo;
         int totalPacketsProccessed = -1;
+        if constexpr (!isReal) {
+            packetProcessor.template operator()<isReal>(time, msg);
+            return 0;
+        }
         if (bufferOffs < Sz) {
             u32 bufferPos = (head + bufferOffs) & (Sz - 1);
             MaskType maskBit = MaskType(1) << bufferPos;
             assert((mask & maskBit) == 0);
+
 
             mask |= maskBit;
             new(&ringBuffer[bufferPos]) BufferItem{msg};
@@ -101,30 +108,28 @@ struct UDPBuffer {
             assert(ringBuffer[bufferPos].localTimestamp == msg.localTimestamp);
 
             if (seqNo == nextMissingSeqNo) {
-
                 CLOCK(MSG_HANDLING_PC,
-                        int maxFull = 1;
-                        MaskType alignedMask = rotr(mask, head);
-                        assert(rotl(alignedMask, head) == mask);
-                        assert(alignedMask & 1);
-                        for (MaskType fullMask = 1;
-                             maxFull < Sz && (fullMask & alignedMask) == fullMask;
-                             ++maxFull, fullMask = nOnes(maxFull));
-                        int packetsToProcess = maxFull - 1;
-                        for (int j = 0; j < packetsToProcess; ++j) {
-                            const MDPacket &p = get(j);
-                            packetProcessor(time, p);
-                        }
-                        advance(packetsToProcess);
-                        totalPacketsProccessed = packetsToProcess;
+                int maxFull = 1;
+                MaskType alignedMask = rotr(mask, head);
+                assert(rotl(alignedMask, head) == mask);
+                assert(alignedMask & 1);
+                for (MaskType fullMask = 1;
+                     maxFull < Sz && (fullMask & alignedMask) == fullMask;
+                     ++maxFull, fullMask = nOnes(maxFull));
+                int packetsToProcess = maxFull - 1;
+                for (int j = 0; j < packetsToProcess; ++j) {
+                    const MDPayload& p = get(j);
+                    packetProcessor.template operator()<isReal>(time, p);
+                }
+                advance(packetsToProcess);
+                totalPacketsProccessed = packetsToProcess;
 
-                        if (!unprocessed.empty() && unprocessed.front().seqNo == nextMissingSeqNo) {
-                            const MDPacket p = unprocessed.front();
-                            unprocessed.pop();
-                            totalPacketsProccessed += newMessage(time, p, packetProcessor);
-                        }
+                if (!unprocessed.empty() && unprocessed.front().seqNo == nextMissingSeqNo) {
+                    const MDPayload p = unprocessed.front();
+                    unprocessed.pop();
+                    totalPacketsProccessed += newMessage<isReal>(time, p, packetProcessor);
+                }
                 )
-
             } else {
                 totalPacketsProccessed = 0;
             }
@@ -132,12 +137,12 @@ struct UDPBuffer {
             unprocessed.emplace_back(msg);
             totalPacketsProccessed = 0;
         } else {
-
             cout << "Book update [" << timeSpent[1] / timeSpent[0] * 100 << "%]" << endl;
             cout << "Order Submission [" << timeSpent[2] / timeSpent[0] * 100 << "%]" << endl;
             cout << "Message Handling [" << timeSpent[3] / timeSpent[0] * 100 << "%]" << endl;
 
             cerr << "Message gap detected: " << (msg.seqNo - nextMissingSeqNo - Sz) << endl;
+
             throw std::runtime_error("Gap detected");
         }
 

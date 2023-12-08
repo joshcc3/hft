@@ -35,7 +35,8 @@ struct LabResult {
     TimeNs disconnectTime;
     std::vector<OrderInfo> seenOrders;
 
-    LabResult() : connectionTime{0}, disconnectTime{0}, seenOrders{} {}
+    LabResult() : connectionTime{0}, disconnectTime{0}, seenOrders{} {
+    }
 
     [[nodiscard]] bool empty() const {
         assert(seenOrders.empty() == (connectionTime == 0));
@@ -51,15 +52,16 @@ public:
     constexpr static int BUFFER_REMOVE_TAG = 2;
     constexpr static int RECV_TAG = 3;
 
-    IOUringState &ioState;
-    const MDServer &md;
+    IOUringState& ioState;
+    const MDServer& md;
 
     bool isAlive;
     int serverFD = -1;
     sockaddr_in serverAddr{};
 
-    static constexpr int BUFFER_SIZE = 1 << 9;
-    static constexpr int NUM_BUFFERS = 10;
+    // we don't want to split our data across multiple buffers
+    static constexpr int BUFFER_SIZE = sizeof(Order) * ((1 << 9)/sizeof(Order));
+    static constexpr int NUM_BUFFERS = 128;
     static constexpr int GROUP_ID = 1;
     std::unique_ptr<char[]> buffers;
     std::bitset<NUM_BUFFERS> used;
@@ -73,14 +75,15 @@ public:
     std::ofstream file_out;
 
 
-    OEServer(IOUringState &ioState, const MDServer &md, const std::string &outFileName) : ioState{ioState}, md{md},
-                                                                                          isAlive{false},
-                                                                                          buffers{std::make_unique<char[]>(
-                                                                                                  BUFFER_SIZE *
-                                                                                                  NUM_BUFFERS)},
-                                                                                          used{},
-                                                                                          file_out{outFileName} {
-
+    OEServer(IOUringState& ioState, const MDServer& md, const std::string& outFileName) : ioState{ioState}, md{md},
+        isAlive{false},
+        buffers{
+            std::make_unique<char[]>(
+                BUFFER_SIZE *
+                NUM_BUFFERS)
+        },
+        used{},
+        file_out{outFileName} {
         serverFD = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
         if (serverFD == -1) {
             cerr << "Could not create oe server [" << errno << "]" << endl;
@@ -92,22 +95,22 @@ public:
         if (setsockopt(serverFD, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0) {
             throw std::runtime_error("setsockopt(SO_REUSEADDR) failed");
         }
-        enable = 1;
-        if (setsockopt(serverFD, SOL_SOCKET, SO_KEEPALIVE, &enable, sizeof(enable)) < 0) {
-            throw std::runtime_error("setsockopt(SO_KEEPALIVE) failed");
-        }
-        int initialProbe = 10;
-        if (setsockopt(serverFD, IPPROTO_TCP, TCP_KEEPIDLE, &initialProbe, sizeof(initialProbe)) < 0) {
-            throw std::runtime_error("setsockopt(TCP_KEEPIDLE) failed");
-        }
-        int subsequentProbes = 2;
-        if (setsockopt(serverFD, IPPROTO_TCP, TCP_KEEPINTVL, &subsequentProbes, sizeof(subsequentProbes)) < 0) {
-            throw std::runtime_error("setsockopt(TCP_KEEPINTVL) failed");
-        }
-        int maxProbes = 2;
-        if (setsockopt(serverFD, IPPROTO_TCP, TCP_KEEPCNT, &maxProbes, sizeof(maxProbes)) < 0) {
-            throw std::runtime_error("setsockopt(TCP_KEEPCNT) failed");
-        }
+        // enable = 1;
+        // if (setsockopt(serverFD, SOL_SOCKET, SO_KEEPALIVE, &enable, sizeof(enable)) < 0) {
+        // throw std::runtime_error("setsockopt(SO_KEEPALIVE) failed");
+        // }
+        // int initialProbe = 10;
+        // if (setsockopt(serverFD, IPPROTO_TCP, TCP_KEEPIDLE, &initialProbe, sizeof(initialProbe)) < 0) {
+        // throw std::runtime_error("setsockopt(TCP_KEEPIDLE) failed");
+        // }
+        // int subsequentProbes = 2;
+        // if (setsockopt(serverFD, IPPROTO_TCP, TCP_KEEPINTVL, &subsequentProbes, sizeof(subsequentProbes)) < 0) {
+        // throw std::runtime_error("setsockopt(TCP_KEEPINTVL) failed");
+        // }
+        // int maxProbes = 2;
+        // if (setsockopt(serverFD, IPPROTO_TCP, TCP_KEEPCNT, &maxProbes, sizeof(maxProbes)) < 0) {
+        // throw std::runtime_error("setsockopt(TCP_KEEPCNT) failed");
+        // }
 
 
         serverAddr.sin_family = AF_INET;
@@ -128,10 +131,10 @@ public:
         }
 
         file_out
-                << "connectionSeen,curLabResult.connectionTime,curLabResult.disconnectTime,orderInfo.orderInfo.submittedTime,orderInfo.receivedTime,orderInfo.orderInfo.triggerReceivedTime,orderInfo.triggerSubmitTime,orderInfo.orderInfo.triggerEvent,orderInfo.orderInfo.flags.isBid,orderInfo.orderInfo.price,orderInfo.orderInfo.qty,orderInfo.orderInfo.id\n";
+                <<
+                "connectionSeen,curLabResult.connectionTime,curLabResult.disconnectTime,orderInfo.orderInfo.submittedTime,orderInfo.receivedTime,orderInfo.orderInfo.triggerReceivedTime,orderInfo.triggerSubmitTime,orderInfo.orderInfo.triggerEvent,orderInfo.orderInfo.flags.isBid,orderInfo.orderInfo.price,orderInfo.orderInfo.qty,orderInfo.orderInfo.id\n";
 
         reset();
-
     }
 
     ~OEServer() {
@@ -151,7 +154,7 @@ public:
         assert(curLabResult.connectionTime == 0);
         assert(curLabResult.disconnectTime == 0);
 
-        io_uring_sqe *acceptSqe = ioState.getSqe(ACCEPT_TAG);
+        io_uring_sqe* acceptSqe = ioState.getSqe(ACCEPT_TAG);
         clientAddrSz = sizeof(clientAddr);
         assert(fcntl(serverFD, F_GETFD) != -1);
         io_uring_prep_accept(acceptSqe, serverFD, (struct sockaddr *) &clientAddr, &clientAddrSz,
@@ -159,14 +162,13 @@ public:
         assert(io_uring_sq_ready(&ioState.ring) == 1);
         int completedEvents = ioState.submitAndWait(1);
         assert(completedEvents == 1);
-        assert(io_uring_cq_ready(&ioState.ring) <= 1);
-        {
+        assert(io_uring_cq_ready(&ioState.ring) <= 1); {
             cqe_guard cg{ioState};
             receiveConn(cg.completion);
         }
     }
 
-    void receiveConn(io_uring_cqe *completion) {
+    void receiveConn(io_uring_cqe* completion) {
         isAlive = true;
         ++connectionSeen;
         clientFD = completion->res;
@@ -188,15 +190,14 @@ public:
 
         curLabResult.disconnectTime = currentTimeNs();
 
-        for (const auto &orderInfo: curLabResult.seenOrders) {
-
+        for (const auto& orderInfo: curLabResult.seenOrders) {
             file_out << connectionSeen << "," << curLabResult.connectionTime << "," << curLabResult.disconnectTime
-                     << "," <<
-                     orderInfo.orderInfo.submittedTime << "," << orderInfo.receivedTime << "," <<
-                     orderInfo.orderInfo.triggerReceivedTime << "," << orderInfo.triggerSubmitTime << "," <<
-                     orderInfo.orderInfo.triggerEvent << "," << orderInfo.orderInfo.flags.isBid << ","
-                     << orderInfo.orderInfo.price << "," <<
-                     orderInfo.orderInfo.qty << "," << orderInfo.orderInfo.id << "\n";
+                    << "," <<
+                    orderInfo.orderInfo.submittedTime << "," << orderInfo.receivedTime << "," <<
+                    orderInfo.orderInfo.triggerReceivedTime << "," << orderInfo.triggerSubmitTime << "," <<
+                    orderInfo.orderInfo.triggerEvent << "," << orderInfo.orderInfo.flags.isBid << ","
+                    << orderInfo.orderInfo.price << "," <<
+                    orderInfo.orderInfo.qty << "," << orderInfo.orderInfo.id << "\n";
         }
         file_out.flush();
         if (clientFD != -1) {
@@ -209,7 +210,6 @@ public:
         curLabResult.seenOrders.clear();
         curLabResult.connectionTime = 0;
         curLabResult.disconnectTime = 0;
-
     }
 
     void releaseBuffers() {
@@ -221,14 +221,13 @@ public:
         assert(nextFreeBuffer >= 0 && nextFreeBuffer <= NUM_BUFFERS);
         assert(nextFreeBuffer == NUM_BUFFERS || !used.test(nextFreeBuffer));
         assert(io_uring_sq_ready(&ioState.ring) == 0);
-        io_uring_sqe *bufferSqe = ioState.getSqe(BUFFER_REMOVE_TAG);
+        io_uring_sqe* bufferSqe = ioState.getSqe(BUFFER_REMOVE_TAG);
         int freeBuffers = int(used.size()) - nextFreeBuffer;
         assert(freeBuffers <= NUM_BUFFERS);
         io_uring_prep_remove_buffers(bufferSqe, freeBuffers, GROUP_ID);
         assert(io_uring_sq_ready(&ioState.ring) == 1);
         int submitted = ioState.submit();
         assert(submitted == 1);
-
     }
 
     void prepareRecv() {
@@ -238,13 +237,13 @@ public:
             assert(!used.test(i));
         }
 
-        io_uring_sqe *bufferSqe = ioState.getSqe(BUFFER_ADD_TAG);
+        io_uring_sqe* bufferSqe = ioState.getSqe(BUFFER_ADD_TAG);
         io_uring_prep_provide_buffers(bufferSqe, buffers.get(), BUFFER_SIZE, NUM_BUFFERS, GROUP_ID, 0);
         assert(io_uring_sq_ready(&ioState.ring) == 1);
 
         assert(clientFD != -1);
         assert(isAlive);
-        io_uring_sqe *recvSqe = ioState.getSqe(RECV_TAG);
+        io_uring_sqe* recvSqe = ioState.getSqe(RECV_TAG);
         io_uring_prep_recv_multishot(recvSqe, clientFD, nullptr, 0, 0);
         recvSqe->buf_group = GROUP_ID;
         assert(recvSqe->flags == 0);
@@ -254,7 +253,7 @@ public:
         recvSqe->buf_group = GROUP_ID;
     }
 
-    void completeMessages(io_uring_cqe &completion) {
+    void completeMessages(io_uring_cqe& completion) {
         assert(isAlive);
         assert(connectionSeen > 0);
         assert(curLabResult.connectionTime > 0);
@@ -282,13 +281,13 @@ public:
             assert(!used.test(bufferIx));
 
 
-            char *buf = buffers.get() + bufferIx * BUFFER_SIZE;
+            char* buf = buffers.get() + bufferIx * BUFFER_SIZE;
             int bytesRead = returnCode;
             u32 numMessages = bytesRead / sizeof(Order);
             assert(bytesRead % sizeof(Order) == 0);
             assert(bytesRead <= BUFFER_SIZE);
 
-            char *endBuf = handleMessages(buf, numMessages, curLabResult, curTime);
+            char* endBuf = handleMessages(buf, numMessages, curLabResult, curTime);
             assert(endBuf == buf + sizeof(Order) * numMessages);
 
             used.set(bufferIx);
@@ -311,15 +310,12 @@ public:
             prepareRecv();
             ioState.submit();
         }
-
-
     }
 
 private:
-    char *handleMessages(char *buf, u32 n, LabResult &lab, TimeNs curTime) {
+    char* handleMessages(char* buf, u32 n, LabResult& lab, TimeNs curTime) {
         for (int i = 0; i < n; ++i) {
-
-            const auto *o = reinterpret_cast<Order *>(buf);
+            const auto* o = reinterpret_cast<Order *>(buf);
             auto timeNow = currentTimeNs();
             OrderId orderId = o->id;
             TimeNs triggerSubmitTime = md.eventTime(o->triggerEvent);
@@ -328,11 +324,11 @@ private:
             assert(md.validEvent(o->triggerEvent));
             assert(std::abs(o->triggerReceivedTime - triggerSubmitTime));
             // TODO: For some reason if an enobufs is delivered even after a packet has been received, its redelivered
-//            assert(o->id > 0 && std::find_if(curLabResult.seenOrders.begin(), curLabResult.seenOrders.end(),
-//                                             [orderId](const OrderInfo &order) {
-//                                                 return order.orderInfo.id == orderId;
-//                                             }) ==
-//                                curLabResult.seenOrders.end());
+            //            assert(o->id > 0 && std::find_if(curLabResult.seenOrders.begin(), curLabResult.seenOrders.end(),
+            //                                             [orderId](const OrderInfo &order) {
+            //                                                 return order.orderInfo.id == orderId;
+            //                                             }) ==
+            //                                curLabResult.seenOrders.end());
             assert(o->price > 0);
             assert(o->qty > 0);
 
@@ -342,7 +338,6 @@ private:
 
         return buf;
     }
-
 };
 
 #endif //LLL_EXCHANGE_OESERVER_H

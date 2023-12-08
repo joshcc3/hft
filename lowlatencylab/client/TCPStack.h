@@ -20,29 +20,6 @@ struct TCPConnConfig {
 };
 
 
-struct ErrorCode {
-    u8 RECV_SYN: 1;
-    u8 RECV_OLD_SEQ: 1;
-    u8 RECV_ACK: 1;
-    u8 RECV_WINDOW: 1;
-    u8 RECV_IS_RST: 1;
-    u8 RECV_UNEXPECTED_ACK: 1;
-
-    void clear() {
-        *reinterpret_cast<u8 *>(this) = 0;
-    }
-
-    bool isErr() const {
-        return *reinterpret_cast<const u8 *>(this);
-    }
-};
-
-inline void logErrAndExit(ErrorCode& err) {
-    printf("Error while receiving data [0x%x]\n", *reinterpret_cast<u8 *>(&err));
-    exit(EXIT_FAILURE);
-}
-
-
 enum class TCPState {
     CLOSED,
     LISTEN,
@@ -53,24 +30,12 @@ enum class TCPState {
     FIN2
 };
 
-template<typename T>
-struct PacketHdr {
-    ethhdr eth;
-    iphdr ip;
-    tcphdr tcp;
-    T data;
-
-    [[nodiscard]] u32 dataSz() const {
-        return ntohs(ip.tot_len) - ip.ihl * 4 - tcp.doff * 4;
-    }
-} __attribute((packed));
-
 using TCPSeqNo = u32;
 using SegmentSz = u32;
 
 struct TCB {
     constexpr static u32 RCV_WINDOW_SZ = 1 << 15;
-    constexpr static u32 SND_WINDOW_SZ = 1 << 12;
+    constexpr static u32 SND_WINDOW_SZ = 1 << 14;
 
     /*
     *SND.UNA	send unacknowledged
@@ -89,6 +54,7 @@ struct TCB {
     */
     u32 sndUNA{};
     u32 sndNXT{};
+    // TODO - need to sync up send window with slots on the tx ring.
     u32 sndWND{SND_WINDOW_SZ};
     u32 sndWL1{};
     u32 sndWL2{};
@@ -97,6 +63,11 @@ struct TCB {
     u32 rcvNXT{};
     u32 rcvWND{RCV_WINDOW_SZ};
     u32 irs{};
+
+    u32 ipMsgId{0};
+    TCPState state{TCPState::CLOSED};
+    SegmentSz peerMSS{536};
+    SegmentSz ourMSS{536};
 };
 
 inline bool operator==(const TCB& b1, const TCB& b2) {
@@ -108,7 +79,11 @@ inline bool operator==(const TCB& b1, const TCB& b2) {
            b1.isn == b2.isn &&
            b1.rcvNXT == b2.rcvNXT &&
            b1.rcvWND == b2.rcvWND &&
-           b1.irs == b2.irs;
+           b1.irs == b2.irs &&
+           b1.state == b2.state &&
+           b1.peerMSS == b2.peerMSS &&
+           b1.ourMSS == b2.ourMSS &&
+           b1.ipMsgId == b2.ipMsgId;
 }
 
 
@@ -123,12 +98,8 @@ public:
 
     XDPIO& io;
 
-    TCPState state{TCPState::CLOSED};
     TCB block;
-    u32 ipMsgId{0};
 
-    SegmentSz peerMSS{536};
-    SegmentSz ourMSS{536};
 
     TCP(XDPIO& io, const TCPConnConfig cfg): cfg{cfg}, io{io} {
         block.isn = isnGen();
@@ -143,7 +114,7 @@ public:
 
 
     template<typename T>
-    void parseTCPOptions(const PacketHdr<T>* packet, __u32 len) {
+    void parseTCPOptions(const PacketHdr<T>* packet) {
         const u8* optionsOffsPtr = reinterpret_cast<const u8 *>(&packet->data);
         const int optionsSz = packet->tcp.doff * 4 - sizeof(tcphdr);
         int optionsOffs = 0;
@@ -156,8 +127,8 @@ public:
                 ++optionsOffs;
             } else if (*optionByte == 2) {
                 assert(*(optionByte + 1) == 4);
-                peerMSS = ntohs(*reinterpret_cast<const u16 *>(optionByte + 2));
-                cout << "Peer MSS [" << peerMSS << "]." << endl;
+                block.peerMSS = ntohs(*reinterpret_cast<const u16 *>(optionByte + 2));
+                cout << "Peer MSS [" << block.peerMSS << "]." << endl;
                 optionsOffs += 4;
             } else {
                 const int tcpOptionLen = *(optionByte + 1);
@@ -182,7 +153,7 @@ public:
         frame.ip.version = 4;
         frame.ip.tos = 0;
         frame.ip.tot_len = htons(packetSz - sizeof(ethhdr));
-        frame.ip.id = ipMsgId;
+        frame.ip.id = block.ipMsgId;
         frame.ip.frag_off = 0x0;
         frame.ip.ttl = IPDEFTTL;
         frame.ip.protocol = IPPROTO_TCP;
@@ -212,7 +183,7 @@ public:
         frame.tcp.urg_ptr = 0;
 
         block.sndNXT += max(static_cast<u32>(sizeof(T)), static_cast<u32>(isSyn) | static_cast<u32>(isFin));
-        ++ipMsgId;
+        ++block.ipMsgId;
 
         assert(frame.ip.check != 0);
         assert(frame.eth.h_proto == htons(ETH_P_IP));
@@ -242,7 +213,7 @@ public:
         assert(block.sndWND == TCB::SND_WINDOW_SZ);
         assert(block.sndNXT > block.isn);
 
-        state = TCPState::SYN_SENT;
+        block.state = TCPState::SYN_SENT;
     }
 
     template<typename T>
@@ -251,10 +222,10 @@ public:
         const u32 senderSeq = ntohl(packet->tcp.seq);
 
         const ErrorCode err{
-            .RECV_OLD_SEQ = senderSeq < block.rcvNXT,
-            .RECV_ACK = static_cast<u32>(ackSeq) < block.sndUNA,
-            .RECV_IS_RST = packet->tcp.rst != 0 || state != TCPState::FIN1 && packet->tcp.fin,
-            .RECV_UNEXPECTED_ACK = packet->tcp.ack != 1
+            .TCP_RECV_OLD_SEQ = senderSeq < block.rcvNXT,
+            .TCP_RECV_ACK = static_cast<u32>(ackSeq) < block.sndUNA,
+            .TCP_RECV_IS_RST = packet->tcp.rst != 0 || block.state != TCPState::FIN1 && packet->tcp.fin,
+            .TCP_RECV_UNEXPECTED_ACK = packet->tcp.ack != 1
         };
         if (__builtin_expect(err.isErr(), false)) {
             return err;
@@ -282,43 +253,35 @@ public:
     }
 
 
-    template<typename PktType, bool Blocking, typename RcvHandler>
-    [[nodiscard]] ErrorCode waitAck(const RcvHandler& handler) {
+    template<typename PktType, typename RcvHandler>
+    [[nodiscard]] ErrorCode processFrame(const RcvHandler& handler, const PktType* packet, u32 bytesReadWithPhy) {
+        assert(bytesReadWithPhy > 0);
+        assert(bytesReadWithPhy - sizeof(ethhdr) - sizeof(iphdr) <= block.sndWND);
+
+        if (const ErrorCode err = rcvPktCheck(packet, bytesReadWithPhy); err.isErr()) {
+            return err;
+        }
+        parseTCPOptions(packet);
+        u32 oneByteAck = static_cast<u32>(packet->tcp.syn) | static_cast<u32>(packet->tcp.fin);
+        block.rcvNXT = ntohl(packet->tcp.seq) + max(packet->dataSz(), oneByteAck);
+        block.rcvWND = ntohs(packet->tcp.window);
+        block.sndUNA = ntohl(packet->tcp.ack_seq);
+        return handler(packet);
+    }
+
+    template<bool Blocking, typename RcvHandler>
+    [[nodiscard]] ErrorCode waitAck(const RcvHandler& handler, int maxExpectedFrames) {
         io.qs.stateCheck();
         io.umem.stateCheck();
         io.socket.stateCheck();
 
         // if we get multiple out of order packets then we should process them smartly - last to first.
         const auto& [available, reserved, idx, fillQIdx] = io.recv<Blocking>();
-
         if (available > 0) {
             assert(reserved == available);
-            const auto [readDesc, readAddr] = io.getReadDesc(idx);
+            assert(available <= maxExpectedFrames);
 
-            const __u32 len = readDesc->len;
-            const u8* inBuf = readAddr;
-            u32 bytesReadWithPhy = len;
-            assert(inBuf != nullptr);
-
-            assert(bytesReadWithPhy > 0);
-            assert(bytesReadWithPhy <= ourMSS - sizeof(ethhdr) - sizeof(iphdr) - sizeof(tcphdr));
-
-            const auto* packet = reinterpret_cast<const PktType *>(inBuf);
-            if (const ErrorCode err = rcvPktCheck(packet, bytesReadWithPhy); err.isErr()) {
-                return err;
-            }
-            parseTCPOptions(packet, len);
-            block.rcvNXT = ntohl(packet->tcp.seq) + max(packet->dataSz(),
-                                                        static_cast<u32>(packet->tcp.syn) | static_cast<u32>(packet->tcp
-                                                            .
-                                                            fin));
-            block.rcvWND = ntohs(packet->tcp.window);
-            block.sndUNA = ntohl(packet->tcp.ack_seq);
-            const ErrorCode err = handler(packet);
-
-            io.releaseSingleFrame(readDesc->addr, fillQIdx);
-
-            return err;
+            return io.handleFrames(available, reserved, idx, fillQIdx, handler);
         } else {
             return {};
         }
@@ -326,8 +289,8 @@ public:
 
     [[nodiscard]] ErrorCode synRecv(const PacketHdr<u8[0]>* packet) {
         assert(block.sndUNA == block.sndNXT);
-        assert(state == TCPState::SYN_SENT);
-        assert(ipMsgId == 1);
+        assert(block.state == TCPState::SYN_SENT);
+        assert(block.ipMsgId == 1);
 
         block.irs = ntohl(packet->tcp.seq);
         block.rcvNXT = ntohl(packet->tcp.seq) + 1;
@@ -336,12 +299,12 @@ public:
         assert(block.sndUNA == block.sndNXT);
         assert(block.irs == ntohl(packet->tcp.seq));
         assert(block.rcvWND == ntohs(packet->tcp.window));
-        assert(peerMSS >= 500 && peerMSS <= 1500);
+        assert(block.peerMSS >= 500 && block.peerMSS <= 1500);
         assert(block.rcvWND >= 1024 && block.rcvWND <= 1 << 16);
 
         return {
-            .RECV_SYN = packet->tcp.syn != 1,
-            .RECV_OLD_SEQ = block.rcvNXT != ntohl(packet->tcp.seq) + 1,
+            .TCP_RECV_SYN = packet->tcp.syn != 1,
+            .TCP_RECV_OLD_SEQ = block.rcvNXT != ntohl(packet->tcp.seq) + 1,
         };
     }
 
@@ -363,12 +326,12 @@ public:
         assert(block.sndNXT > block.isn);
         assert(frame.dataSz() == 0);
 
-        state = TCPState::ESTABLISHED;
+        block.state = TCPState::ESTABLISHED;
     }
 
     template<typename PktType>
     void prepareDataSend(PktType& frame, int dataSz) {
-        assert(state == TCPState::ESTABLISHED);
+        assert(block.state == TCPState::ESTABLISHED);
         assert(block.sndUNA <= block.sndNXT);
         assert(block.sndNXT > block.isn);
         assert(block.rcvNXT > block.irs);
@@ -382,29 +345,29 @@ public:
         setTCPCsum(frame);
 
         ogBlock.sndNXT += dataSz;
+        ++ogBlock.ipMsgId;
         assert(ogBlock == block);
         assert(block.sndWND == TCB::SND_WINDOW_SZ);
         assert(block.sndNXT > block.isn);
-        assert(frame.dataSz() == 8);
 
-        state = TCPState::ESTABLISHED;
+        block.state = TCPState::ESTABLISHED;
     }
 
     [[nodiscard]] ErrorCode waitDataAck(const PacketHdr<u8[0]>* packet) const {
-        assert(state == TCPState::ESTABLISHED);
+        assert(block.state == TCPState::ESTABLISHED);
         assert(packet->dataSz() == 0);
         return {
-            .RECV_SYN = packet->tcp.syn == 1,
-            .RECV_OLD_SEQ = block.rcvNXT != ntohl(packet->tcp.seq),
-            .RECV_ACK = packet->tcp.ack != 1 || block.sndUNA > ntohl(packet->tcp.ack_seq),
-            .RECV_WINDOW = ntohs(packet->tcp.window) < 128,
-            .RECV_IS_RST = packet->tcp.fin == 1,
+            .TCP_RECV_SYN = packet->tcp.syn == 1,
+            .TCP_RECV_OLD_SEQ = block.rcvNXT != ntohl(packet->tcp.seq),
+            .TCP_RECV_ACK = packet->tcp.ack != 1 || block.sndUNA > ntohl(packet->tcp.ack_seq),
+            .TCP_RECV_WINDOW = ntohs(packet->tcp.window) < 128,
+            .TCP_RECV_IS_RST = packet->tcp.fin == 1,
         };
     }
 
 
     [[nodiscard]] ErrorCode establishTCPConnection() {
-        assert(state == TCPState::CLOSED);
+        assert(block.state == TCPState::CLOSED);
         assert(io.socket.xskFD > 2);
         assert(io.qs.txQ.mask > 0);
         assert(io.qs.rxQ.mask > 0);
@@ -414,12 +377,16 @@ public:
         prepareSyn();
         io.triggerWrite();
         assert(block.sndNXT == block.isn + 1);
-        const auto synRcvHandler = [this](const PacketHdr<u8[0]>* packet) {
+        const auto synRcvHandler = [this](const u8* inBuf, u32 len, bool IsReal) {
+            if (!IsReal) {
+                cerr << "Illegal State: tcp conn is called with dry run." << endl;
+                assert(false);
+            }
+            const auto* packet = reinterpret_cast<const PacketHdr<u8[0]> *>(inBuf);
             assert(packet->tcp.fin == false);
-            return synRecv(packet);
+            return processFrame([this](const auto* packet) { return synRecv(packet); }, packet, len);
         };
-        const ErrorCode err = waitAck<const PacketHdr<u8[0]>, true>(synRcvHandler);
-        if (__builtin_expect(err.isErr(), false)) {
+        if (const ErrorCode err = waitAck<true>(synRcvHandler, 1); err.isErr()) {
             return err;
         }
         prepareCompleteHandshake();
@@ -432,24 +399,27 @@ public:
         return io.getWriteBuff(pktSz);
     }
 
-    template<typename PktType>
-    [[nodiscard]] ErrorCode sendData(PktType& frame, int dataSz) {
+    template<bool IsReal, typename DataT>
+    [[nodiscard]] ErrorCode sendData(PacketHdr<DataT>& frame) {
+        constexpr int dataSz = sizeof(DataT);
+        TCB ogBlock{block};
         prepareDataSend(frame, dataSz);
-        io.triggerWrite();
 
-        const auto handler = [this](const PacketHdr<u8[0]>* packet) {
-            return waitDataAck(packet);
-        };
-        const ErrorCode err = waitAck<PacketHdr<u8[0]>, false>(handler);
+        if constexpr (IsReal) {
+            CLOCK(ORDER_SUBMISSION_PC,
+                  io.triggerWrite();
+            )
+            io.complete();
+        } else {
+            block = ogBlock;
+        }
 
-        io.complete();
-
-        return err;
+        return {};
     }
 
 
     void close() {
-        assert(state == TCPState::ESTABLISHED);
+        assert(block.state == TCPState::ESTABLISHED);
         assert(block.sndUNA <= block.sndNXT);
         assert(block.sndNXT > block.isn);
         assert(block.rcvNXT > block.irs);
@@ -468,47 +438,58 @@ public:
         setTCPCsum(frame);
 
         ++ogBlock.sndNXT;
+        ++ogBlock.ipMsgId;
         assert(ogBlock == block);
         assert(block.sndWND == TCB::SND_WINDOW_SZ);
         assert(block.sndNXT > block.isn);
 
-        state = TCPState::FIN1;
+        block.state = TCPState::FIN1;
         io.triggerWrite();
         ogBlock.sndUNA = block.sndNXT;
 
         const auto stateUpd = [this](const PktType* pkt) {
-            state = pkt->tcp.fin ? TCPState::FIN2 : state;
+            block.state = pkt->tcp.fin ? TCPState::FIN2 : block.state;
             block.rcvNXT += pkt->dataSz();
             block.rcvWND = ntohs(pkt->tcp.window);
             return ErrorCode{
-                .RECV_ACK = pkt->tcp.fin && block.sndNXT != ntohl(pkt->tcp.ack_seq),
-                .RECV_IS_RST = pkt->tcp.fin && ntohl(pkt->tcp.ack_seq) != block.sndNXT,
+                .TCP_RECV_ACK = pkt->tcp.fin && block.sndNXT != ntohl(pkt->tcp.ack_seq),
+                .TCP_RECV_IS_RST = pkt->tcp.fin && ntohl(pkt->tcp.ack_seq) != block.sndNXT,
             };
         };
-
+        const auto finHandler = [this, stateUpd](const u8* inBuf, u32 _len, bool isReal) {
+            if (!isReal) {
+                cerr << "Illegal State: conn close is called with fake." << endl;
+                assert(false);
+            }
+            assert(_len == sizeof(ethhdr) + sizeof(iphdr) + sizeof(tcphdr));
+            const auto* pkt = reinterpret_cast<const PktType *>(inBuf);
+            return processFrame(stateUpd, pkt, _len);
+        };
         // TODO set a timer here to wait on connection reset.
-        while (state == TCPState::FIN1) {
-            if (ErrorCode err = waitAck<PktType, true>(stateUpd); err.isErr()) {
+        while (block.state == TCPState::FIN1) {
+            if (ErrorCode err = waitAck<true>(finHandler, XSKQueues::NUM_READ_DESC); err.isErr()) {
                 logErrAndExit(err);
             }
         }
         assert(block.sndUNA == block.sndNXT);
         assert(block.rcvNXT > ogBlock.rcvNXT);
+        /* TODO - this isn't generating the right message
         ogBlock.rcvNXT = block.rcvNXT;
+        {
+            u8* outputBuf = io.getWriteBuff(packetSz);
 
-        outputBuf = io.getWriteBuff(packetSz);
+            auto& frame = *reinterpret_cast<PktType *>(outputBuf);
+            prepareMsg(frame, packetSz, false, true);
 
-        frame = *reinterpret_cast<PktType *>(outputBuf);
-        prepareMsg(frame, packetSz, false, true);
-        frame.tcp.fin = true;
+            setTCPCsum(frame);
 
-        setTCPCsum(frame);
-
-        ogBlock.rcvWND = block.rcvWND;
-        ++ogBlock.sndNXT;
-        assert(ogBlock == block);
-        io.triggerWrite();
-        io.complete();
+            ogBlock.rcvWND = block.rcvWND;
+            ++ogBlock.sndNXT;
+            assert(ogBlock == block);
+            io.triggerWrite();
+            io.complete();
+        }
+        */
     }
 
 

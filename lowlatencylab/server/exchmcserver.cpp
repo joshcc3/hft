@@ -115,13 +115,14 @@ public:
                                         cerr << "OS Throttle [" << strerror(-resultCode) << "]. " << endl;
                                         md.throttle(userData);
                                     } else {
+                                        cout << "ERR: result code [" << -resultCode << "] tag [" << userData << "]" << endl;
                                         assert(false);
                                     }
                                 } else if (userData == OEServer::BUFFER_ADD_TAG) {
                                     [[maybe_unused]] u64 completionRes = e.res;
                                     [[maybe_unused]] u64 completionTag = e.user_data;
                                     assert(e.res == OEServer::NUM_BUFFERS || e.res == 0);
-                                    assert(!oe.used.test(6));
+                                    assert(!oe.used.test(60));
                                 } else if (userData == OEServer::BUFFER_REMOVE_TAG) {
                                     auto completionRes = e.res;
                                     if (completionRes <= 0) {
@@ -145,6 +146,7 @@ public:
                         unsigned int pending = io_uring_sq_ready(&ioState.ring);
                         assert(pending <= 2);
                         if (!md.isEOF() && oe.connectionAlive()) {
+
                             md.send();
                         }
                     }
@@ -238,8 +240,8 @@ private:
 
 int main() {
     const string &ofname = "data/trades_500M.csv";
-    // const string &fname = "data/deribit_incremental_book_L2_2019-07-01_BTC-PERPETUAL.csv.gz";
-    const string &fname = "data/l2_mine.csv.gz";
+    const string &fname = "data/deribit_incremental_book_L2_2019-07-01_BTC-PERPETUAL.csv.gz";
+    // const string &fname = "data/l2_mine.csv.gz";
     std::ifstream ifile(fname, std::ios_base::in | std::ios_base::binary);
     if (!ifile) {
         std::cerr << "Failed to open the file." << std::endl;

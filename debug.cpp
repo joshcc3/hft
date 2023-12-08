@@ -1,4 +1,4 @@
-//
+    //
 // Created by jc on 25/10/23.
 //
 
@@ -22,17 +22,33 @@ using namespace std;
 using u64 = uint64_t;
 using u32 = uint32_t;
 
-template<typename T>
-void p() {
-    cout << typeid(T).name() << endl;
+#include <iostream>
+
+class Functor {
+public:
+    template<bool shouldPrint>
+    void operator()(const std::string& x) {
+        if constexpr (shouldPrint) {
+            std::cout << "Value: " << x << std::endl;
+        } else {
+            // Do nothing if shouldPrint is false
+            std::cout << "Printing is disabled." << std::endl;
+        }
+    }
+};
+
+template<typename F>
+int testFun(F f) {
+    f.template operator()<true>("Hello World");   // This will print "Value: Hello World"
+    f.template operator()<false>("Hello World");  // This will not print the value, but will indicate that printing is disabled
+
+    return 0;
 }
 
 int main() {
-    vector<int> a{1,2,3};
-    int p = 4;
-    cout << *a.rbegin() << endl;
+    Functor f{};
+    testFun(f);
 }
-
 
 struct A {
 

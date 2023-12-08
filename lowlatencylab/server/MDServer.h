@@ -40,7 +40,7 @@ public:
     static constexpr u64 MD_SEND_TAG = 4;
     static constexpr int SND_BUF_SZ = 1 << 8;
     static constexpr int SND_BUF_HIGH_WATERMARK = int(SND_BUF_SZ * 0.7);
-    static constexpr int PACKET_SIZE = sizeof(MDPacket) * 5;
+    static constexpr int PACKET_SIZE = sizeof(MDPayload) * 5;
     static constexpr TimeNs DISCONNECT_TIMEOUT = 2'000'000'000;
 
     const std::string headerLine;
@@ -127,7 +127,7 @@ public:
 
     }
 
-    void fillMDPacket(u8 *&bufPos, u32 &bufLen, TimeNs timeNow, const std::string &line) {
+    void fillMDPayload(u8 *&bufPos, u32 &bufLen, TimeNs timeNow, const std::string &line) {
 
         TimeNs timestamp = 0;
         TimeNs localTimestamp = 0;
@@ -144,7 +144,7 @@ public:
 
         isBid = side == BUY;
 
-        MDPacket &packet = *reinterpret_cast<MDPacket *>(bufPos);
+        MDPayload &packet = *reinterpret_cast<MDPayload *>(bufPos);
         packet.packetType = MD_PACKET_TYPE;
         packet.seqNo = cursor;
         packet.localTimestamp = timeNow;
@@ -181,15 +181,15 @@ public:
             u8 *bufStart = buffer.get();
             u8 *bufPos = bufStart;
             std::string line;
-            for (int i = 0; i < PACKET_SIZE / sizeof(MDPacket) && !instream->eof(); ++i) {
+            for (int i = 0; i < PACKET_SIZE / sizeof(MDPayload) && !instream->eof(); ++i) {
                 std::getline(*instream, line);
                 if (!line.empty()) {
-                    fillMDPacket(bufPos, bufLen, timeNow, line);
+                    fillMDPayload(bufPos, bufLen, timeNow, line);
                 } else {
-                    MDPacket &terminationPacket = *reinterpret_cast<MDPacket *>(bufPos);
+                    MDPayload &terminationPacket = *reinterpret_cast<MDPayload *>(bufPos);
                     terminationPacket.flags.isTerm = true;
-                    bufPos += sizeof(MDPacket);
-                    bufLen += sizeof(MDPacket);
+                    bufPos += sizeof(MDPayload);
+                    bufLen += sizeof(MDPayload);
                     assert(instream->eof());
                 }
             }
@@ -222,15 +222,15 @@ public:
             u8 *bufStart = buffer.get();
             u8 *bufPos = bufStart;
             std::string line;
-            for (int i = 0; i < PACKET_SIZE / sizeof(MDPacket) && !instream->eof(); ++i) {
+            for (int i = 0; i < PACKET_SIZE / sizeof(MDPayload) && !instream->eof(); ++i) {
                 std::getline(*instream, line);
                 if (!line.empty()) {
-                    fillMDPacket(bufPos, bufLen, timeNow, line);
+                    fillMDPayload(bufPos, bufLen, timeNow, line);
                 } else {
-                    MDPacket &terminationPacket = *reinterpret_cast<MDPacket *>(bufPos);
+                    MDPayload &terminationPacket = *reinterpret_cast<MDPayload *>(bufPos);
                     terminationPacket.flags.isTerm = true;
-                    bufPos += sizeof(MDPacket);
-                    bufLen += sizeof(MDPacket);
+                    bufPos += sizeof(MDPayload);
+                    bufLen += sizeof(MDPayload);
                     assert(instream->eof());
                 }
             }
