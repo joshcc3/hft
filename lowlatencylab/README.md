@@ -240,11 +240,12 @@ echo abcd | nc 192.168.100.2 1234 on host to test network connectivity.
 
 yum install bridge-utils
 
-Mkonjibhu123!
-jc-dev
 ./qemu-system-x86_64 -m 1024 -enable-kvm -drive if=virtio,file=test.qcow2,cache=none -cdrom ~/Downloads/Fedora-Workstation-Live-x86_64-38-1.6.iso \
 -netdev tap,id=net0,ifname=tap0,script=no,downscript=no \
 -device e1000e,netdev=net0,id=nic0
+mkonjibhu123
+user jc
+edited sudoers and turned off the firewall from the management console here: 192.168.100.2:9090.
 
 
 I tried getting multicast traffic looped back to the host forwarded to the tap device. The loopback works.
