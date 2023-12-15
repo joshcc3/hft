@@ -26,6 +26,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
+#include "IGB82576IO.h"
 #include "TCPStack.h"
 #include "XDPIO.h"
 
@@ -48,7 +49,7 @@ public:
     OrderId orderId = 1;
 
 
-    explicit OE(XDPIO& io, const std::string& oeHost): tcp{io, cfg} {
+    explicit OE(IGB82576IO<StrategyCont>& io, const std::string& oeHost): tcp{io, cfg} {
         const addrinfo hints{
             .ai_family = AF_INET,
             .ai_socktype = SOCK_STREAM

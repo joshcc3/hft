@@ -2,34 +2,27 @@
 // Created by jc on 03/11/23.
 //
 
-#ifndef TICTACTOE_DEFS_H
-#define TICTACTOE_DEFS_H
+#ifndef DEFS_H
+#define DEFS_H
 
-#include <sys/syscall.h>
-#include <fstream>
 
-#include <openssl/sha.h>
-#include <iostream>
-#include <iomanip>
-#include <cstring>
-
-#include <cstddef>
-#include <cstdint>
-#include <vector>
-#include <algorithm>
-#include <cstddef>
-#include <liburing.h>
 #include <chrono>
 #include <cassert>
-#include <iostream>
-#include <unordered_map>
 #include <linux/if_ether.h>
 #include <linux/udp.h>
-#include <netinet/ip.h>
-#include <array>
+#include <linux/ip.h>
+#include <linux/tcp.h>
 #include <dirent.h>
-#include <netinet/tcp.h>
 
+#define ___htonl(x) __cpu_to_be32(x)
+#define ___htons(x) __cpu_to_be16(x)
+#define ___ntohl(x) __be32_to_cpu(x)
+#define ___ntohs(x) __be16_to_cpu(x)
+
+#define htonl(x) ___htonl(x)
+#define ntohl(x) ___ntohl(x)
+#define htons(x) ___htons(x)
+#define ntohs(x) ___ntohs(x)
 
 #define NDEBUG
 
@@ -52,10 +45,6 @@ inline double elapsed(T t1, T t2) {
     GET_PC(c) += elapsed(_s, _e);                      \
 }
 
-
-using std::cerr;
-using std::endl;
-using std::cout;
 
 
 using u64 = uint64_t;
@@ -200,163 +189,6 @@ inline int MSG_HANDLING_PC = 3;
 inline int SYS_RECV_PC = 4;
 
 
-inline std::string getProgramNameByTid(pid_t parentTID, pid_t tid) {
-    std::string path = "/proc/" + std::to_string(parentTID) + "/task/" + std::to_string(tid) + "/comm";
-    std::ifstream commFile(path);
-    std::string programName;
-
-    if (commFile.is_open() && std::getline(commFile, programName)) {
-        // Successfully read the program name
-        return programName;
-    } else {
-        // Handle the error if the file cannot be opened or read
-        return "Error: Unable to read program name";
-    }
-}
-
-struct IOUringState {
-    enum class URING_FD {
-        _numFD
-    };
-
-    static constexpr ssize_t FILE_TABLE_SZ = int(URING_FD::_numFD);
-    static constexpr int QUEUE_DEPTH = 1 << 10;
-
-    std::array<int, FILE_TABLE_SZ> fileTable{};
-    io_uring ring{};
-
-    explicit IOUringState(bool enableSQPoll) {
-        io_uring_params params{};
-
-        if (enableSQPoll) {
-            params = {
-                .sq_entries = QUEUE_DEPTH,
-                .cq_entries = QUEUE_DEPTH * 2,
-                .flags = IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_SQPOLL | IORING_SETUP_SQ_AFF,
-                .sq_thread_cpu = SQ_POLL_PINNED_CPU,
-                .sq_thread_idle = 30'000,
-            };
-        } else {
-            params = {
-                .sq_entries = QUEUE_DEPTH,
-                .cq_entries = QUEUE_DEPTH * 2,
-                .flags = IORING_SETUP_SINGLE_ISSUER
-            };
-        }
-
-        if (int error = io_uring_queue_init_params(QUEUE_DEPTH, &ring, &params) < 0) {
-            cerr << "Queue init failed [" << error << "]." << endl;
-            throw std::runtime_error("Unable to setup io_uring queue");
-        }
-        assert(params.sq_entries == QUEUE_DEPTH);
-        assert(params.cq_entries == QUEUE_DEPTH * 2);
-        assert(params.features & IORING_FEAT_SUBMIT_STABLE);
-        assert(params.features & IORING_FEAT_CQE_SKIP);
-
-        assert(ring.sq.ring_entries == QUEUE_DEPTH);
-        assert(ring.cq.ring_entries == 2 * QUEUE_DEPTH);
-        assert(ring.sq.sqe_tail == ring.sq.sqe_head);
-
-        if (FILE_TABLE_SZ > 0) {
-            if (const int res = io_uring_register_files_sparse(&ring, FILE_TABLE_SZ); res != 0) {
-                cerr << "Register files (Errno " << -res << ")." << endl;
-                exit(EXIT_FAILURE);
-            }
-        }
-
-        if (enableSQPoll) {
-            // Wait for process completion to finish
-            usleep(100'000);
-            // Wait for sq-poll to be scheduled
-            auto mainTID = static_cast<pid_t>(syscall(SYS_gettid));
-            pid_t guessedSQPollTID = -1;
-
-
-            std::string path = "/proc/" + std::to_string(mainTID) + "/task/";
-
-            const char* dirPath = path.c_str();
-            DIR* dir = opendir(dirPath);
-
-            if (dir == nullptr) {
-                std::perror("opendir failed");
-                exit(EXIT_FAILURE);
-            }
-
-            const dirent* entry;
-            while ((entry = readdir(dir)) != nullptr) {
-                if (entry->d_name[0] != '.') {
-                    int tid = std::stoi(entry->d_name);
-                    if (tid != mainTID) {
-                        if (guessedSQPollTID != -1) {
-                            cerr << "Unexpected number of worker threads" << endl;
-                        } else {
-                            guessedSQPollTID = tid;
-                        }
-                    }
-                }
-            }
-
-            auto comm = getProgramNameByTid(mainTID, guessedSQPollTID);
-            if (comm.compare(0, 8, "iou-sqp-") != 0) {
-                cerr << "Could not find sq-poll tid" << endl;
-                usleep(100'000'000);
-                exit(EXIT_FAILURE);
-            }
-
-            cout << "Kernel SQ Poll Thread [" << guessedSQPollTID << "] [" << comm << "]." << endl;
-
-            sched_param schparam{};
-            constexpr int receiveThreadPolicy = SCHED_FIFO;
-            constexpr int priority = 99; // sched_get_priority_max(receiveThreadPolicy);
-            schparam.sched_priority = priority;
-            if (sched_setscheduler(guessedSQPollTID, receiveThreadPolicy, &schparam)) {
-                cerr << "Error [" << errno << " in setting priority: " << strerror(errno) << endl;
-                exit(EXIT_FAILURE);
-            }
-        }
-    }
-
-    void registerFD(URING_FD fdName, int fd) {
-        const int fileTable[1] = {fd};
-        io_uring_register_files_update(&ring, static_cast<int>(fdName), fileTable, 1);
-    }
-
-    ~IOUringState() {
-        io_uring_queue_exit(&ring);
-    }
-
-    [[nodiscard]] io_uring_sqe* getSqe(u64 tag) {
-        assert(tag < (u64(1) << 31));
-        io_uring_sqe* sqe = io_uring_get_sqe(&ring);
-        assert(nullptr != sqe);
-        io_uring_sqe_set_data64(sqe, tag);
-
-        return sqe;
-    }
-
-    int submit() {
-        int submitted = io_uring_submit(&ring);
-        assert(submitted > 0);
-        return submitted;
-    }
-
-    int submitAndWait(int n) {
-        return io_uring_submit_and_wait(&ring, n);
-    }
-
-    io_uring_cqe* popCqe() {
-        io_uring_cqe* cqe;
-        // TODO: I get interrupts here - un sure why
-        int res = io_uring_wait_cqe(&ring, &cqe);
-        assert(res == 0);
-        u64 tag = io_uring_cqe_get_data64(cqe);
-        // ReSharper disable once CppUnsignedZeroComparison
-        assert(tag >= 0);
-
-        return cqe;
-    }
-};
-
 struct MDFlags {
     bool isBid: 1;
     bool isSnapshot: 1;
@@ -391,30 +223,13 @@ struct MDFrame {
     udphdr udp;
 } __attribute__((packed));
 
-inline bool operator==(const IOUringState& s1, const IOUringState& s2) {
-    return &s1 == &s2;
-}
-
-
-struct cqe_guard {
-    io_uring_cqe* completion;
-    IOUringState& ring;
-
-    explicit cqe_guard(IOUringState& ring) : ring{ring} {
-        completion = ring.popCqe();
-    }
-
-    ~cqe_guard() {
-        io_uring_cqe_seen(&ring.ring, completion);
-    }
-};
 
 inline constexpr int OE_PORT = 9012;
 
-inline std::string MCAST_ADDR = "239.255.0.1";
+inline char* MCAST_ADDR = "239.255.0.1";
 inline constexpr int MCAST_PORT = 12345;
 
-inline std::string MD_UNICAST_HOSTNAME = "lll-1.md.client";
+inline char* MD_UNICAST_HOSTNAME = "lll-1.md.client";
 inline constexpr uint16_t MD_UNICAST_PORT = 4321;
 
 inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 3'000'000'000;
@@ -485,16 +300,6 @@ inline int parseDeribitMDLine(const char* msg, TimeNs& timestamp, TimeNs& localT
     return matched;
 }
 
-
-inline bool checkMessageDigest(const u8* buf, ssize_t bytes) {
-    static std::unordered_map<int, MDPayload> seenHashes{};
-    const MDPayload& p = *reinterpret_cast<const MDPayload *>(buf);
-
-    const auto& [e, inserted] = seenHashes.emplace(p.seqNo, p);
-
-    assert(inserted);
-    return true;
-}
 
 
 static inline unsigned short from32to16(unsigned int x) {

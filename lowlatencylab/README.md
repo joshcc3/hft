@@ -374,3 +374,72 @@ you need to use ioctls to add the multicast group
 rm lll_strategy || (g++ -o lll_strategy -luring lowlatencylab/client/mdmcclient.cpp lowlatencylab/client/mdmcclient.h lowlatencylab/client/L2OB.cpp lowlatencylab/client/L2OB.h lowlatencylab/defs.h lowlatencylab/client/Strat.h && nc 192.168.100.2 -p 1234)
 
 sudo ./qemu-system-x86_64 -m 1024 -enable-kvm -drive if=virtio,file=test.qcow2,cache=none -cdrom ~/Downloads/Fedora-Workstation-Live-x86_64-38-1.6.iso   -netdev tap,id=net0,ifname=tap0,script=no,downscript=no   -device e1000e,netdev=net0,id=nic0
+
+
+
+
+Thanks, that solved it.
+So I have written a server and a client that work in userspace using xdp for low latency order placement. I have also modified the igb driver so that I can interact with the network card directly to receive packets as they come in via interrupts and write packets directly into the nic buffer. I would now like to modify the client strategy to utilize the functionality I have created in the modified driver.
+The interface for the receive is void handleMDPacket(struct UDPMDPacket *packet, u16 packetSz). 
+The interface for transmit is:
+prepareWrite(cpu, tx_ring);
+struct TCPPacket *pkt = getPacketBuffer(dmaSendBuffer);
+preparePacket(pkt);
+completeTx(tx_ring, pkt);
+
+The client program is structured as follows: it configures the thread its running on to be a realtime thread and sets its affinity. then it runs a loop with a state machine with: Init -> oeconnect->running. it moves from init to oeconnect by initiating a tcp connection to an exchange server. Then it moves from oe connect to running once the tcp connection is established and in a
+loop blocks on data. on receiving data it parses it, updates the order book and optionally fires a trade. it currently requests a buffer from the xdp umem to format its trades but I'd
+like to change it to use the above interface to use the driver directly.
+The marketdata server on receiving a tcp connection starts streaming data out to the connected client.
+Now, in order to achieve this refactor there are a couple of things that need to change.
+First the tcp establishment logic must be done. We need a trigger in this module to establish a client connection. This can most likely be done by the ethtool command line interface which we shall have to hack.
+So on receiving an ethtool command to initiate a connection we transmit a tcp syn to the server. from then on the receive packet handler will route tcp messages on the oe connection 
+to the tcp state machine and udp md packets to the strategy logic. the strategy logic can remain relatively unchanged and run as before.
+The current oe holds a handle to a tcp object that does the sending. we can move the above interface into a tcp class and swing it. 
+That tcp interface does offer a establish connection which is a blocking call. 
+we are going to have to modify the logic to include the fact that we can no longer rely on blocking calls. 
+the tcp connector will have to have a callback on the strategy object that moves it along its state machine to connected.
+the problem here is that the strategy object is structured around these blocking calls with a looping control flow format.
+We need to transform this into an interrupt driven control flow format. in order to move to this. we can preserve the blocking semantic by 
+in its state machine adding more states that that indicate where its at. it must then route to its internal object that was previously doing the blocking call.
+the internal object will return true or false to indicate whether the blocking call is done and the state machine can progress.
+
+
+so lets start with the tcp handler. the main thing to update here is the XDPIO member variable.
+This has the following interface.
+
+handleFrames, getWriteBuf, cancelPrevWriteBuff, triggerWrite, complete, getReadDesc, releaseSingleFrame
+the problematic ones are the blocking ones and the ones that take handlers.
+
+releaseSingleFrame - this isnt used so can be deleted.
+getReadDesc - also not used so can be delete.
+complete - this is implemented by the driver in its poll logic. we should potentially be aware of this and trap the completions
+           to tx queue we care about for the sake of keeping track of latencies. defer to the poll for cleanup.
+triggerWrite - this is the moneyshot, will map to completetx. fairly straightforward. for us fire and forget for now track completions later as mentioned above.
+cancelPrevWriteBuf - this one is a hopefully not too tricky and all we need to do is revert the next to use change.
+getWriteBuf - also a relatively simple one that maps directly. Currently we obtain a chunk of memory and cycle through it. I wonder how the kernel slab allocator is for performance instead.
+              We should get completions all bunched up together and we shouldn't ever run out of next to use by just proceeding linearly so theres no reason to use a general purpose allocator here.
+              I think something that simply allocates the next available block in a txring should be good and allocate the memory upfront.
+handleFrames - ok this is probably going to be a tricky one. so the interface is given a number of frames that are available, 
+               retrieve the descriptors and run the provided handler on them. after that release all the frames. the provided handler is just a function pointer.
+               so actually this is not so bad because there's no blocking logic, just some indirection which ultimately are all
+              inlinable function calls.
+recv - ok this is actually the only tricky one. all of these others dont require blocking calls. so this blocks waiting for
+       a packet. the tricky thing about implementing this interface is basically we need to capture the current call stack
+       and then when a packet comes in play it back from where it paused. you need to pause the coroutine and then when data is available
+       continue its execution. This means that we need to manipulate all the callers of this function. we also can't do fake updates which we need to revert when trying to keep our hot path warm 
+       because an interrupt will see inconcsistent data here. we would have to clone our datastructures potentially at the call sites or something...
+       Luckily there are only two callers of this function. waitAck which is used at several points in establishing the tcp connection and the main client blocking receieve.
+       at a time there is only going to be a single unambiguous listener for this received packets (ok we do get tcp acks etc. but the strategy arbitrates that). which means
+       we can have a single slot that captures the state of the continuation. Continuations are modilled as (a -> r) -> r.
+       So that's what we have to accept. the function calls into the blocking receive providing the continuation (a -> r).
+       When we get a packet, we fire the continuation slot. Make sure this continuation slot is occupied on fire and also it is only updated once. make sure to let the compiler know when it is updated as well.
+       you can use a const T and template out the slot? yeah and from the callsite call the correct template function. 
+        
+The other thing is going to be compiling without access to the standard library.
+What that means is none of the stl which i do use a fair bit...
+
+
+
+
+TODO - also need to adapt the tcpclient to use the new interface... need to adapt because when formatting tcp packets we need the sequence numbers.

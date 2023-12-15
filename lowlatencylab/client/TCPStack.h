@@ -6,6 +6,7 @@
 #define TCP_H
 #include <netinet/tcp.h>
 
+#include "IGB82576IO.h"
 #include "XDPIO.h"
 
 using namespace std;
@@ -96,12 +97,12 @@ public:
 
     const TCPConnConfig cfg;
 
-    XDPIO& io;
+    IGB82576IO<StrategyCont>& io;
 
     TCB block;
 
 
-    TCP(XDPIO& io, const TCPConnConfig cfg): cfg{cfg}, io{io} {
+    TCP(IGB82576IO<StrategyCont>& io, const TCPConnConfig cfg): cfg{cfg}, io{io} {
         block.isn = isnGen();
         block.sndNXT = block.isn;
     }
@@ -269,14 +270,14 @@ public:
         return handler(packet);
     }
 
-    template<bool Blocking, typename RcvHandler>
-    [[nodiscard]] ErrorCode waitAck(const RcvHandler& handler, int maxExpectedFrames) {
-        io.qs.stateCheck();
-        io.umem.stateCheck();
-        io.socket.stateCheck();
+    template<bool Blocking, typename RcvHandler, typename Cont>
+    [[nodiscard]] ErrorCode waitAck(const StrategyCont<RcvHandler, Cont>& handler, const  int maxExpectedFrames) {
+        io.stateCheck();
 
         // if we get multiple out of order packets then we should process them smartly - last to first.
+
         const auto& [available, reserved, idx, fillQIdx] = io.recv<Blocking>();
+
         if (available > 0) {
             assert(reserved == available);
             assert(available <= maxExpectedFrames);

@@ -5,7 +5,7 @@ project(tictactoe)
 project(lll_strategy)
 project(lll_exchange)
 project(xdp_test)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 find_package(Boost 1.78.0 COMPONENTS iostreams REQUIRED)
 
@@ -22,6 +22,11 @@ add_executable(lll_strategy
         lowlatencylab/client/Strat.h
         lowlatencylab/client/XDPIO.cpp
         lowlatencylab/client/XDPIO.h
+        lowlatencylab/client/IGB82576IO.h
+        lowlatencylab/client/IGB82576IO.cpp
+        cppkern/containers.h
+        cppkern/containers.cpp
+        cppkern/kernlib.h
 )
 
 add_executable(cubist
@@ -46,7 +51,12 @@ add_executable(networking networking/epoll_test.cpp
         networking/io_uring_eg.cpp
         networking/select_io.h)
 
-add_executable(debug debug.cpp)
+add_executable(debug cppkern/coroutine.h
+        cppkern/coroutine.h
+        cppkern/coroutine.cpp
+        cppkern/ucontext_.h
+        cppkern/ucontext_.s
+        cppkern/defs.h)
 
 add_executable(obtester
         cubist/orderbook_tester.cpp

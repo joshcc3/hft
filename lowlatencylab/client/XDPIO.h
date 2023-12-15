@@ -60,7 +60,7 @@ public:
         const int nextSlot = front;
         assert(!umemFrameState.test(nextSlot));
         umemFrameState.set(nextSlot);
-        front = front + 1 & MASK;
+        front = (front + 1) & MASK;
         return (nextSlot + XSKQueues::NUM_FILL_DESC) * XSKUmem_FRAME_SIZE;
     }
 
@@ -116,7 +116,6 @@ struct XSKUmem {
         assert(buffer != nullptr);
     }
 };
-
 
 struct XSKSocket {
     constexpr static int QUEUE = 0;
@@ -240,14 +239,6 @@ struct XSKSocket {
     }
 };
 
-
-struct RecvRes {
-    u32 available;
-    u32 reserved;
-    u32 idx;
-    u32 fillQIdx;
-};
-
 class XDPIO {
 public:
     int intransit = 0;
@@ -341,6 +332,11 @@ public:
 
         const auto handlerErr = handler(inBuf, len, isAvail);
         err.append(handlerErr);
+        if (isAvail) {
+            unsigned long long* fillQEntry = xsk_ring_prod__fill_addr(&qs.fillQ, fillQIdx);
+            assert(fillQEntry != nullptr);
+            *fillQEntry = readDesc->addr;
+        }
 
         for (int i = isAvail; __builtin_expect(i < available, true); ++i) {
             const auto curTime = currentTimeNs();
@@ -455,38 +451,6 @@ public:
             }
             xsk_ring_cons__release(&qs.completionQ, rcvd);
         }
-    }
-
-    std::pair<const xdp_desc *, u8 *> getReadDesc(u32 idx) {
-        const xdp_desc* readDesc = xsk_ring_cons__rx_desc(&qs.rxQ, idx);
-        const __u64 addr = readDesc->addr;
-        const __u32 len = readDesc->len;
-        const __u32 options = readDesc->options;
-
-        assert(xsk_umem__extract_addr(addr) == addr);
-        assert(xsk_umem__extract_offset(addr) == 0);
-        assert(options == 0);
-        assert((u64(umem.buffer) & 4095) == 0);
-        assert((addr & 255) == 0 && ( addr - 256 & XSKUmem_FRAME_SIZE - 1) == 0);
-        assert(addr < XSKUmem_FRAME_SIZE * (umem.NUM_FRAMES - 1));
-        assert(len < XSKUmem_FRAME_SIZE);
-
-        u8* readAddr = static_cast<u8 *>(xsk_umem__get_data(umem.buffer, addr));
-
-        assert(readAddr == umem.buffer + addr);
-        assert((reinterpret_cast<u64>(readAddr) & 127) == 0);
-
-        return {readDesc, readAddr};
-    }
-
-    void releaseSingleFrame(u32 addr, unsigned fillQIdx) {
-        unsigned long long* fillQEntry = xsk_ring_prod__fill_addr(&qs.fillQ, fillQIdx);
-        assert(fillQEntry != nullptr);
-        *fillQEntry = addr;
-
-        assert(!xsk_ring_prod__needs_wakeup(&qs.fillQ));
-        xsk_ring_cons__release(&qs.rxQ, 1);
-        xsk_ring_prod__submit(&qs.fillQ, 1);
     }
 };
 

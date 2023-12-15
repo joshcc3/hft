@@ -1,5 +1,42 @@
 Notes on the linux kernel
 
+Good book on linux kernel
+https://0xax.gitbooks.io/linux-insides/content/SyncPrim/linux-sync-2.html
+
+Useful to know:
+
+The value of VMALLOCBASE varies depending on whether you're using a 32-bit x86 system or a 64-bit x86_64 system. In general, VMALLOCBASE is the starting address of the vmalloc area in the kernel's virtual memory layout.
+
+For 32-bit x86 systems, VMALLOCBASE is typically set to 0xC0000000.
+For 64-bit x86_64 systems, VMALLOCBASE is typically set to 0xffffc20000000000.
+
+#define __START_KERNEL_map	_AC(0xffffffff80000000, UL)
+kernel data is in high memory and is mapped directly to physical pages starting at offset 0.
+virtual memory is mapped relative to PAGE_OFFSET.
+
+
+a q_vector is the target for MSIX interrupts. You configure the hardware interrupt table using mmio writes.
+each location corresponds to a specific q_vector. igb_assign_vector is relevant here
+write_ivar:
+ *  This function is intended to handle the writing of the IVAR register                                              
+ *  for adapters 82576 and newer.  The IVAR table consists of 2 columns,                                              
+ *  each containing an cause allocation for an Rx and Tx ring, and a                                                  
+ *  variable number of rows depending on the number of queues supported.
+
+There is a qvector per read and per tx queue
+
+https://docs.kernel.org/core-api/dma-api-howto.html
+sudo cat /proc/iomem gives a layout of the physical memory and device mappings
+it shows which buses correspond to which addresses.
+
+
+You start by configuring the msix to point to a specific qvector. you associate the qvector with an interrupt
+using the kernel function request_irq to which you give the qvector, a name and callback function. this is featured
+in the /proc/interrupts file.
+On an interrupt occurring, the callback igb_msix_ring is invoked. this schedules napi and goes to sleep.
+then igb_poll is called to service the tx or rx interrupt.
+
+
 tracepoints in /sys/kernel/debug/tracing/events
 sudo bpftrace -e 'tracepoint:net:netif_receive_skb /str(args->name) == "lo"/ { printf("%s: %s\n", comm, str(args->name)); }'
 root@fedora:/home/joshuacoutinho/CLionProjects/hft/lowlatencylab/client/bpf# sudo bpftrace -e 'tracepoint:net:netif_receive_skb /str(args->name) == "lo" && comm=="strategy"/ { printf("%s: %d\n", comm, ((struct sk_buff*)(args->skbaddr))->pkt_type); }'
@@ -143,3 +180,64 @@ https://git.esa.informatik.tu-darmstadt.de/net/100-gbps-fpga-tcp-ip-stack
 
 notes on device drivers
 https://www.privateinternetaccess.com/blog/linux-networking-stack-from-the-ground-up-part-2/
+
+https://lwn.net/Articles/914992/
+
+KERNEL_VERSION=6.7.0-rc3-00288-g441546c15745-dirty;ROOTFS=/home/joshuacoutinho/CLionProjects/qemu-8.1.3/isos/igb-patch.qcow2; sudo qemu -nbd --connect=/dev/nbd1 $ROOTFS  && sudo mount /dev/nbd1p1 /mnt/igb-vm/ && sudo cp -r /lib/modules/$KERNEL_VERSION/ /mnt/igb-vm/lib/modules/ && sudo umount /mnt/igb-vm  && sudo qemu-nbd --disconnect /dev/nbd1
+
+KERNEL_VERSION=6.7.0-rc3-00288-g441546c15745-dirty;ROOTFS=/home/joshuacoutinho/CLionProjects/qemu-8.1.3/isos/igb-patch.qcow2; make -j12 && sudo make modules_install && sudo make install && sudo qemu-nbd --connect=/dev/nbd1 $ROOTFS  && sudo mount /dev/nbd1p1 /mnt/igb-vm/ && sudo cp -r /lib/modules/$KERNEL_VERSION/ /mnt/igb-vm/lib/modules/ && sudo umount /mnt/igb-vm  && sudo qemu-nbd --disconnect /dev/nbd1 && gdb -ex "target remote :1234" -ex "c" vmlinux
+
+
+How to Determine the Exact Location of the Crash
+Check the Source Code: If you have access to the source code of the igb module, open the josh_handle_packets function and count 0x27a bytes from the start of the function. This should bring you to the approximate location of the crash.
+
+Use GDB: If you have a compiled version of the igb module with debugging symbols (igb.ko with debug info), you can use GDB to find the exact line of the crash:
+
+bash
+Copy code
+gdb /path/to/igb.ko
+(gdb) list *(josh_handle_packets+0x27a)
+Replace /path/to/igb.ko with the actual path to your compiled igb module.
+
+Reproduce and Debug: If you can reproduce the issue, running the module under a debugger or analyzing core dumps (if available) can provide more context.
+
+Kernel Debugging Tools: Using tools like kdump and crash to analyze kernel crash dumps can also be very helpful in complex scenarios.
+
+Understanding kernel panics and debugging them effectively often requires a deep understanding of both the Linux kernel and the specific drivers or modules involved. If you're not familiar with kernel development, consider seeking help from someone who is, or from the community around the igb module or driver.
+----
+
+
+c++ libraries: concurr and mthreading
+
+[root@fedora ~]# ip addr add 192.168.100.2/24 dev enp0s3 && nc -l 192.168.100.2 1234 > /lib/modules/6.7.0-rc3-00287-g7e7fb23f73d1-dirty/kernel/drivers/net/ethernet/josh.ko 
+
+https://blog.packagecloud.io/monitoring-tuning-linux-networking-stack-receiving-data/
+
+For gdb debugging in the kernel
+https://nickdesaulniers.github.io/blog/2018/10/24/booting-a-custom-linux-kernel-in-qemu-and-debugging-it-with-gdb/
+In addition you have to run make menuconfig and set
+You can easily compile the kernel with debug symbols by enabling CONFIG_DEBUG_INFO . If you are using make menuconfig it's going to be under "Kernel hacking" -> "Compile-time checks and compiler options" -> "Compiler a kernel with debug info".
+In order to get the symbols loaded for a dynamically loaded module, use lx-symbols. This will load the symbols for the module igb, you can then set a hardware breakpoint at the corresponding location.
+
+
+sudo qemu-system-x86_64 -s -S    -m 2048 -cpu host --enable-kvm -kernel /boot/vmlinuz-6.7.0-rc3-00288-g441546c15745-dirty -initrd /boot/initramfs-6.7.0-rc3-00288-g441546c15745-dirty.img -hda CLionProjects/qemu-8.1.3/isos/igb-patch.qcow2  -netdev tap,id=net0,ifname=tap0,script=no,downscript=no -device igb,netdev=net0,id=nic0  -nographic -append "root=/dev/sda1 rw nokaslr console=ttyS0 init=/lib/systemd/systemd"
+
+
+git submodule add https://github.com/username/submodule-repo.git external/submodule-repo
+git submodule init
+git submodule update
+
+
+
+
+
+
+-----
+I have some code that blocks on a recv and once that completes proceeds to parse the packet and performs some work. then in a loop blocks on a recv and then does some more work. I'm replacing the current library for recv with something that is interrupt driven. i.e. packet arrival is announced via an interrupt and my interrupt handler is called. The application is low latency and I want to handle the reception of the packets in the flow as when the interrupt handler is called. My question is what's the best way to refactor the existing code without too many changes.
+One idea I had was to use continuation passing style. The io module has a continuation that represents what to do on packet received. That continuation would represent the current code all the way from waking up from the blocking recv to blocking the next receive. The blocking recv is called in 2 functions that are both called from 3 different places that both are called from a number of places.
+I have a couple of questions about how to achieve and code this.
+No. 1, how do I represent the continuation?
+- as a function object? but how do I then capture the fact that I must start from the point just after the blocking recv with the context of what called this function and where to return to.
+- I think the c++ coroutines api is the correct way to do this however I do not have access to the c++ stdlib so I shall have to implement it myself
+
+The problem is that alot of the recv calls are in function calls that are called from many different places. 

@@ -1,6 +1,4 @@
-.idea/
+*.o
+*.gz
 cmake-build-debug/
-data/output*
-data/deribit*
-data/
-*~
+.idea/

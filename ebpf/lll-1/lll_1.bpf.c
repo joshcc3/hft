@@ -27,12 +27,6 @@ typedef __u16 u16;
 typedef __u32 u32;
 typedef __u64 u64;
 
-struct order_data {
-    int seqId;
-    int price;
-    char side;
-    int seqIdOut;
-} __attribute__ ((packed));
 
 struct Packet {
     struct ethhdr eth;
@@ -40,7 +34,6 @@ struct Packet {
     struct udphdr udp;
     u8 packetType;
     char _padding[5];
-    struct order_data od;
 } __attribute__ ((packed));
 
 int num_socks = 1;
@@ -51,12 +44,23 @@ SEC("xdp")
 int lll_1(struct xdp_md *ctx)
 {
 
+
   if(ctx->data != ctx->data_meta) {
     bpf_printk("Unexpected metadata");
     return XDP_DROP;
   }
   void* data = (void*)(long)ctx->data;
   void* data_end = (void*)(long)ctx->data_end;
+
+  if(data + 14 < data_end) {
+    bpf_printk("%d: %x %x", counter++, ((u8*)data)[0], ((u8*)data)[1]);
+    bpf_printk("%x %x %x", ((u8*)data)[2], ((u8*)data)[3], ((u8*)data)[4]);
+    bpf_printk("%x %x %x", ((u8*)data)[5], ((u8*)data)[6], ((u8*)data)[7]);
+    bpf_printk("%x %x %x", ((u8*)data)[8], ((u8*)data)[9], ((u8*)data)[11]);
+    bpf_printk("%x %x %x", ((u8*)data)[12], ((u8*)data)[13], ((u8*)data)[14]);        
+  }
+
+
   if((data + sizeof(struct Packet)) > data_end) {
     u64 sz = data_end - data;
     bpf_printk("small packet: %d", sz);
@@ -75,11 +79,9 @@ int lll_1(struct xdp_md *ctx)
 
     bpf_printk("Packet: %d, type %d", counter++, p->packetType);
     if(p->packetType == 2) {
-      bpf_printk("Order: price: %d", p->od.price);
       return bpf_redirect_map(&xsks_map, 0, XDP_DROP);
     }
     if(p->packetType == 1) {
-      bpf_printk("Forwarding marketdata packet");
       return bpf_redirect_map(&xsks_map, 0, XDP_DROP);
     }
 

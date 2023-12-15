@@ -14,6 +14,8 @@
 #include <unistd.h>
 #include <cstring>
 
+#include "IGB82576IO.h"
+
 
 enum class StrategyState {
     INIT,
@@ -26,6 +28,7 @@ struct SampleMDPacket {
     MDPayload payload[5];
 } __attribute__((packed));
 
+
 class alignas(XSKUmem_FRAME_SIZE) Driver {
 public:
     SampleMDPacket warmupPacket;
@@ -33,7 +36,7 @@ public:
 
     int fileTable[1]{};
 
-    XDPIO io{"veth1", "/sys/fs/bpf/strat"};
+    IGB82576IO<StrategyCont> io{"enp0s3", &initnet};
     L2OB ob{};
     OE oe{io, "lll-1.oe"};
     Strat strat{oe, ob, io};
