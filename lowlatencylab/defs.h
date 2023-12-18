@@ -417,7 +417,7 @@ inline constexpr int MCAST_PORT = 12345;
 inline std::string MD_UNICAST_HOSTNAME = "lll-1.md.client";
 inline constexpr uint16_t MD_UNICAST_PORT = 4321;
 
-inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 3'000'000'000;
+inline static constexpr PriceL TRADE_THRESHOLD = PRECISION_L * 500'000'000;
 
 
 inline int parseDeribitMDLine(const char* msg, TimeNs& timestamp, TimeNs& localTimestamp, bool& isSnapshot, Side& side,

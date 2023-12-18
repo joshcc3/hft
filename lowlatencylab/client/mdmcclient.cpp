@@ -130,26 +130,26 @@ public:
                             return strat.recvUdpMD<false>(inBuf, len);
                         }
                     };
-                    // CLOCK(TOT_RECV_PC,
+                    CLOCK(TOT_RECV_PC,
                           u32 idx;
                           u32 available;
                           u32 fillQIdx;
                           u32 reserved;
                           // if we get multiple out of order packets then we should process them smartly - last to first.
-                          // CLOCK(SYS_RECV_PC,
+                          CLOCK(SYS_RECV_PC,
                               const auto& res = io.recv<true>();
                               available = res.available;
                               reserved = res.reserved;
                               idx = res.idx;
                               fillQIdx = res.fillQIdx;
                               assert(reserved == available);
-                          // )
+                          )
                           if(const auto& err = io.handleFrames(available, reserved, idx, fillQIdx, handler);
                               __builtin_expect(err.isErr(), false)) {
                           logErrAndExit(err);
                           }
-                    // )
-                    constexpr int modulus = 0x1fffff;
+                    )
+                    constexpr int modulus = 0x0;
                     if (__builtin_expect((++counter1 & modulus) == 0, false)) {
                         const TimeNs cTime = currentTimeNs();
                         cout << "Iters [" << counter1 << "]" << '\n';

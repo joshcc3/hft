@@ -105,12 +105,19 @@ public:
         };
 
         TopLevel topLevel;
-
+        if (!bid.empty() && !ask.empty()) {
+            topLevel.set(bid.back().price, ask.back().price, bid.back().levelQty, ask.back().levelQty);
+        }
 
         auto iter = std::find_if(level.rbegin(), level.rend(), sideComp);
         assert(iter == level.rend() || sideComp(*iter) && iter->lastUpdated <= localTimestamp);
         assert(iter != level.rend() || level.empty() ||
             (!sideComp(*(iter - 1)) || (iter - 1)->price == price) && (iter - 1)->lastUpdated <= localTimestamp);
+
+        if (iter != level.rbegin()) {
+            topLevel.bidSize = -1;
+            topLevel.askSize = -1;
+        }
 
         if (IsReal) {
             const bool isTopLevelUpdate = iter != level.rbegin();
@@ -128,7 +135,6 @@ public:
             }
 
             if (!bid.empty() && !ask.empty() && isTopLevelUpdate) {
-                topLevel.set(bid.back().price, ask.back().price, bid.back().levelQty, ask.back().levelQty);
                 spreadEWMA = spreadEWMA/2 + (topLevel.bestAsk - topLevel.bestBid) / 2;
             }
 
