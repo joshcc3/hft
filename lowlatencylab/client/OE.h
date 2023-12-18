@@ -6,76 +6,39 @@
 #define LLL_EXCHANGE_OE_H
 
 #include <cstring>
-#include <unistd.h>
-#include <cstdlib>
-#include <cstdio>
-#include <sched.h>
-#include <new>
-#include <cassert>
-#include <bitset>
-#include <memory>
-#include <x86intrin.h>
 #include <arpa/inet.h>
-#include <netinet/tcp.h>
-#include <netinet/ip.h>
-#include <netinet/in.h>
-#include <array>
-#include "../defs.h"
-#include "L2OB.h"
-#include "mdmcclient.h"
-#include <arpa/inet.h>
+#include "defs.h"
 #include <netdb.h>
 
-#include "IGB82576IO.h"
 #include "TCPStack.h"
-#include "XDPIO.h"
+#include "IGB82576IO.h"
 
+template<typename X>
 class OE {
 public:
     // TODO Use POLLHUP to determine when the other end has hung up
 
     constexpr static u64 ORDER_TAG = 3;
 
-    const TCPConnConfig cfg{
-        .destMAC = {0x0, 0x0, 0x0, 0x0, 0x0, 0x2},
-        .srcMAC = {0x0, 0x0, 0x0, 0x0, 0x0, 0x1},
-        .sourceIP = {10, 0, 0, 1},
-        .destIP = {10, 0, 0, 2},
-        .sourcePort = TCP::SENDING_PORT,
-        .destPort = OE_PORT
-    };
+    constexpr static TCPConnConfig cfg{
+	// .destMAC = {0x48, 0xd3, 0x43, 0xe9, 0x5c, 0xa0},
+	// .srcMAC = {0x3c, 0xe9, 0xf7, 0xfe, 0xdf, 0x6c},
+	// .sourceIP = {192, 168, 0, 104},
+	// .destIP = {52, 56, 175, 121},
+	.destMAC = {0xd2, 0x64, 0x11, 0xc3, 0x95, 0x51},
+	.srcMAC = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56},
+	.sourceIP = {192, 168, 100, 2},
+	.destIP = {192, 168, 100, 1},
+	.sourcePort = TCP_SENDING_PORT,
+	.destPort = OE_PORT
+   };
 
-    TCP tcp;
+
+    TCP<X> tcp;
     OrderId orderId = 1;
 
 
-    explicit OE(IGB82576IO<StrategyCont>& io, const std::string& oeHost): tcp{io, cfg} {
-        const addrinfo hints{
-            .ai_family = AF_INET,
-            .ai_socktype = SOCK_STREAM
-        };
-
-        addrinfo* res{};
-
-        int status;
-        if ((status = getaddrinfo(oeHost.c_str(), nullptr, &hints, &res)) != 0) {
-            std::cerr << "getaddrinfo: " << gai_strerror(status) << std::endl;
-            return;
-        }
-
-        assert(res->ai_next == nullptr);
-        assert(res != nullptr);
-        assert(res->ai_family == AF_INET);
-
-        sockaddr_in serverAddr = *(sockaddr_in *) res->ai_addr;
-        assert(serverAddr.sin_family == AF_INET);
-
-        void* addr = &(serverAddr.sin_addr);
-        char ipstr[16];
-        inet_ntop(res->ai_family, addr, ipstr, sizeof ipstr);
-        std::cout << "OE Server: " << ipstr << std::endl;
-
-        assert(serverAddr.sin_addr.s_addr == *reinterpret_cast<const u32*>(&cfg.destIP));
+    explicit OE(IGB82576IO<X, TCP<X>>& io): tcp{io, cfg} {
     }
 
     ~OE() {
@@ -84,11 +47,12 @@ public:
 
     void establishConnection() {
         if (ErrorCode err = tcp.establishTCPConnection(); err.isErr()) {
-            logErrAndExit(err);
+        	pr_info__("tcp error establish error detected, baliing");
+        	swapcontext_(&tcp.io.ctxM.blockingRecvCtx, &tcp.io.ctxM.interruptCtx);
+	        logErrAndExit(err);
         }
     }
 
-    template<bool IsReal>
     void submit(MDMsgId triggerEvent, TimeNs triggerRecvTime, PriceL price, Qty qty, OrderFlags flags) {
         /*
             TODO - setup queue polling to avoid the system call for the kernel to automatically
@@ -118,11 +82,8 @@ public:
         assert(frame.data.qty == qty);
 
 
-        if (ErrorCode err = tcp.sendData<IsReal>(frame); err.isErr()) {
+        if (ErrorCode err = tcp.sendData(frame); err.isErr()) {
             logErrAndExit(err);
-        }
-        if constexpr (!IsReal) {
-            tcp.io.cancelPrevWriteBuff();
         }
 
 

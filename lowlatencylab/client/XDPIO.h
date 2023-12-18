@@ -4,22 +4,17 @@
 
 #ifndef XDPIO_H
 #define XDPIO_H
-#include <utility>
-#include "../defs.h"
+#include "defs.h"
 #include <sys/resource.h>
 #include <sys/capability.h>
 #include <sys/mman.h>
 
 #include <xdp/xsk.h>
 #include <xdp/libxdp.h>
-#include <bpf/libbpf.h>
-
 #include <linux/if_link.h>
 
-#include <string>
-
 #include "XDPIO.h"
-#include <bitset>
+
 
 struct XSKQueues {
     constexpr static int NUM_READ_DESC = XSK_RING_CONS__DEFAULT_NUM_DESCS * 8;
@@ -60,7 +55,7 @@ public:
         const int nextSlot = front;
         assert(!umemFrameState.test(nextSlot));
         umemFrameState.set(nextSlot);
-        front = (front + 1) & MASK;
+        front = front + 1 & MASK;
         return (nextSlot + XSKQueues::NUM_FILL_DESC) * XSKUmem_FRAME_SIZE;
     }
 
@@ -90,8 +85,8 @@ struct XSKUmem {
                                         PROT_READ | PROT_WRITE,
                                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0));
         if (buffer == MAP_FAILED) {
-            printf("ERROR: mmap failed\n");
-            exit(EXIT_FAILURE);
+            printf__("ERROR: mmap failed\n");
+            assert(false);
         }
 
         constexpr xsk_umem_config cfg = {
@@ -107,7 +102,7 @@ struct XSKUmem {
         if (xsk_umem__create(&umem, buffer, bufferSz, &qs.fillQ, &qs.completionQ,
                              &cfg)) {
             perror("Umem: ");
-            exit(EXIT_FAILURE);
+            assert(false);
         }
     }
 
@@ -116,6 +111,7 @@ struct XSKUmem {
         assert(buffer != nullptr);
     }
 };
+
 
 struct XSKSocket {
     constexpr static int QUEUE = 0;
@@ -128,19 +124,16 @@ struct XSKSocket {
         cfg.rx_size = XSKQueues::NUM_READ_DESC;
         cfg.tx_size = XSKQueues::NUM_WRITE_DESC;
         cfg.libxdp_flags = XSK_LIBBPF_FLAGS__INHIBIT_PROG_LOAD;
-        cfg.xdp_flags = XDP_FLAGS_SKB_MODE;
-        cfg.bind_flags = XDP_USE_NEED_WAKEUP | XDP_COPY;
+        cfg.xdp_flags = XDP_FLAGS_DRV_MODE;
+        cfg.bind_flags = XDP_USE_NEED_WAKEUP;
 
         const xdp_program* program = xdp_program__from_pin(xdpProgPinPath.c_str());
-        if (nullptr == program || u64(program) >= u64(-4095)) {
-            cerr << "Failed to get program" << endl;
-            exit(EXIT_FAILURE);
-        }
+        assert (!(nullptr == program || u64(program) >= u64(-4095)));
 
         if (xsk_socket__create(&socket, iface.c_str(), QUEUE, umem.umem,
                                &qs.rxQ, &qs.txQ, &cfg)) {
             perror("XSK: ");
-            exit(EXIT_FAILURE);
+            assert(false);
         }
 
         xskFD = xsk_socket__fd(socket);
@@ -149,18 +142,12 @@ struct XSKSocket {
         const int programFD = xdp_program__fd(program);
         assert(programFD > xskFD);
         const int xsksMapFD = lookupBPFMap(programFD);
-        if (xsksMapFD < 0) {
-            cerr << "ERROR: no xsks map found: " << xsksMapFD << endl;
-            exit(EXIT_FAILURE);
-        }
+        assert(xsksMapFD >= 0);
 
         constexpr int key = 0;
         const int fd = xskFD;
         const u32 ret = bpf_map_update_elem(xsksMapFD, &key, &fd, BPF_ANY);
-        if (ret != 0) {
-            cerr << "bpf_map_update_elem Errno: " << -ret << endl;
-            exit(EXIT_FAILURE);
-        }
+        assert(ret == 0);
 
 
         int sock_opt = 1;
@@ -172,14 +159,14 @@ struct XSKSocket {
         if (setsockopt(xskFD, SOL_SOCKET, SO_BUSY_POLL,
                        (void *) &sock_opt, sizeof(sock_opt)) < 0) {
             perror("No busy poll");
-            exit(EXIT_FAILURE);
+            assert(false);
         }
 
         sock_opt = 1000;
         if (setsockopt(xskFD, SOL_SOCKET, SO_BUSY_POLL_BUDGET,
                        (void *) &sock_opt, sizeof(sock_opt)) < 0) {
             perror("No busy poll");
-            exit(EXIT_FAILURE);
+            assert(false);
         }
     }
 
@@ -239,6 +226,14 @@ struct XSKSocket {
     }
 };
 
+
+struct RecvRes {
+    u32 available;
+    u32 reserved;
+    u32 idx;
+    u32 fillQIdx;
+};
+
 class XDPIO {
 public:
     int intransit = 0;
@@ -249,19 +244,13 @@ public:
     explicit XDPIO(const std::string& iface, const std::string& xdpProgPinPath): qs{}, umem{qs},
         socket{umem, qs, iface, xdpProgPinPath} {
         constexpr rlimit r = {RLIM_INFINITY, RLIM_INFINITY};
-        if (setrlimit(RLIMIT_MEMLOCK, &r)) {
-            cerr << "ERROR: setrlimit(RLIMIT_MEMLOCK): " << errno << endl;
-            exit(EXIT_FAILURE);
-        }
+        assert(!setrlimit(RLIMIT_MEMLOCK, &r)):
         setlocale(LC_ALL, "");
 
         qs.stateCheck();
         u32 idx = 0;
         const u32 prodReserveRes = xsk_ring_prod__reserve(&qs.fillQ, XSKQueues::NUM_FILL_DESC, &idx);
-        if (prodReserveRes != XSKQueues::NUM_FILL_DESC) {
-            cerr << "Fill ring reserve: " << -prodReserveRes << endl;
-            exit(EXIT_FAILURE);
-        }
+        assert(prodReserveRes == XSKQueues::NUM_FILL_DESC);
         assert(idx == 0);
 
         for (int i = 0; i < prodReserveRes; i++) {
@@ -332,11 +321,6 @@ public:
 
         const auto handlerErr = handler(inBuf, len, isAvail);
         err.append(handlerErr);
-        if (isAvail) {
-            unsigned long long* fillQEntry = xsk_ring_prod__fill_addr(&qs.fillQ, fillQIdx);
-            assert(fillQEntry != nullptr);
-            *fillQEntry = readDesc->addr;
-        }
 
         for (int i = isAvail; __builtin_expect(i < available, true); ++i) {
             const auto curTime = currentTimeNs();
@@ -391,8 +375,8 @@ public:
         assert(qs.txQ.mask != 0);
         const u32 txSlotsRecvd = xsk_ring_prod__reserve(&qs.txQ, 1, &txIdx);
         if (__builtin_expect(txSlotsRecvd != 1, false)) {
-            cerr << "Could not reserve tx slots." << endl;
-            exit(EXIT_FAILURE);
+            printf__("Could not reserve tx slots.");
+            assert(false);
         }
         assert((txIdx & (XSKQueues::NUM_WRITE_DESC - 1)) == umem.txState.front);
 
@@ -434,7 +418,7 @@ public:
             if (!(ret >= 0 || errno == ENOBUFS || errno == EAGAIN ||
                   errno == EBUSY || errno == ENETDOWN)) {
                 perror("Kick did not work");
-                exit(EXIT_FAILURE);
+                assert(false);
             }
         } else {
             assert((socket.cfg.bind_flags & XDP_COPY) == 0);
@@ -451,6 +435,38 @@ public:
             }
             xsk_ring_cons__release(&qs.completionQ, rcvd);
         }
+    }
+
+    std::pair<const xdp_desc *, u8 *> getReadDesc(u32 idx) {
+        const xdp_desc* readDesc = xsk_ring_cons__rx_desc(&qs.rxQ, idx);
+        const __u64 addr = readDesc->addr;
+        const __u32 len = readDesc->len;
+        const __u32 options = readDesc->options;
+
+        assert(xsk_umem__extract_addr(addr) == addr);
+        assert(xsk_umem__extract_offset(addr) == 0);
+        assert(options == 0);
+        assert((u64(umem.buffer) & 4095) == 0);
+        assert((addr & 255) == 0 && ( addr - 256 & XSKUmem_FRAME_SIZE - 1) == 0);
+        assert(addr < XSKUmem_FRAME_SIZE * (umem.NUM_FRAMES - 1));
+        assert(len < XSKUmem_FRAME_SIZE);
+
+        u8* readAddr = static_cast<u8 *>(xsk_umem__get_data(umem.buffer, addr));
+
+        assert(readAddr == umem.buffer + addr);
+        assert((reinterpret_cast<u64>(readAddr) & 127) == 0);
+
+        return {readDesc, readAddr};
+    }
+
+    void releaseSingleFrame(u32 addr, unsigned fillQIdx) {
+        unsigned long long* fillQEntry = xsk_ring_prod__fill_addr(&qs.fillQ, fillQIdx);
+        assert(fillQEntry != nullptr);
+        *fillQEntry = addr;
+
+        assert(!xsk_ring_prod__needs_wakeup(&qs.fillQ));
+        xsk_ring_cons__release(&qs.rxQ, 1);
+        xsk_ring_prod__submit(&qs.fillQ, 1);
     }
 };
 

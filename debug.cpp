@@ -3,30 +3,33 @@
 //
 
 
-#include <iostream>
-#include <algorithm>
-#include <vector>
-#include <array>
-#include <map>
-#include <unordered_map>
-#include <chrono>
-#include <cassert>
-#include <deque>
-#include <x86intrin.h>
-#include <bitset>
-#include <functional>
-
-
 
 using namespace std;
 
+
+
+
 // tODO - always_destroy
 
-using u64 = uint64_t;
-using u32 = uint32_t;
 
 #include <iostream>
 
+template <typename X, typename Y>
+union A {
+    X a;
+    Y b;
+};
+
+template
+void f(A<int, char>& a, int c) {
+    cout << a.a + c << endl;
+}
+
+int main() {
+    A a{.a = 1};
+    void (*g)(A&, int) = f;
+    g(a, 10);
+}
 
 /*
  *
@@ -67,7 +70,3 @@ f x = Cont $ \c -> c (x - 1)
 */
 
 
-
-int main() {
-
-}

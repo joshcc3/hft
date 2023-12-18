@@ -5,6 +5,7 @@
 #ifndef UCONTEXT__H
 #define UCONTEXT__H
 
+#include "defs.h"
 
 #define SIG_BLOCK	0
 #define SIG_SETMASK	2
@@ -88,11 +89,11 @@ typedef struct {
 
 #define _SIGSET_NWORDS (1024 / (8 * sizeof (unsigned long int)))
 
-typedef struct {
-    unsigned long int __val[_SIGSET_NWORDS];
-} __sigset_t;
-
-typedef __sigset_t sigset_t;
+// typedef struct {
+//      unsigned long int __val[_SIGSET_NWORDS];
+// } __sigset_t;
+//
+// typedef __sigset_t sigset_t;
 
 
 typedef struct ucontext_t {
@@ -155,7 +156,14 @@ enum
   # define REG_CR2	REG_CR2
   };
 
-extern "C" void makecontext_(ucontext_t* ucp, void (*func)(), int argc, ...);
+/*
+ Remember when using this library to only call from the same process
+ virtual memory and page tables are not refreshed.
+ Good question - do kernel threads all share the same page table space?
+ when a kernel switches between different threads, what is different?
+ whats special about the interrupt handling context?
+*/
+
 
 typedef __builtin_va_list va_list;
 #define va_start(v, l)	__builtin_va_start(v, l)
@@ -163,20 +171,11 @@ typedef __builtin_va_list va_list;
 #define va_arg(v, T)	__builtin_va_arg(v, T)
 #define va_copy(d, s)	__builtin_va_copy(d, s)
 
+// extern "C" void makecontext_(ucontext_t* ucp, void (*func)(), int argc, ...);
 extern "C" void start_context_();
 // extern void push_start_context_(ucontext_t*) ;
-
-// Remember when using this library to only call from the same process
-// virtual memory and page tables are not refreshed.
-// Good question - do kernel threads all share the same page table space?
-// when a kernel switches between different threads, what is different?
-// whats special about the interrupt handling context?
-
 extern "C" void getcontext_(ucontext_t* o);
-
-
 extern "C" void setcontext_(const ucontext_t* __ucp);
-
 extern "C" void swapcontext_(ucontext_t* o, ucontext_t* d);
 
 #endif //UCONTEXT__H

@@ -77,6 +77,7 @@ public:
                     // write out marketdata
 
                     if (!oe.connectionAlive() && !md.isAlive()) {
+                        cout << "OE collection complete." << endl;
                         md.reset();
                         assert(io_uring_sq_ready(&ioState.ring) == 0);
                         if (io_uring_cq_ready(&ioState.ring)) {
@@ -148,6 +149,9 @@ public:
                         if (!md.isEOF() && oe.connectionAlive()) {
 
                             md.send();
+                            if(md.isEOF()) {
+                                cout << "Marketdata replay complete." << endl;
+                            }
                         }
                     }
 
@@ -240,8 +244,8 @@ private:
 
 int main() {
     const string &ofname = "data/trades_500M.csv";
-    const string &fname = "data/deribit_incremental_book_L2_2019-07-01_BTC-PERPETUAL.csv.gz";
-    // const string &fname = "data/l2_mine.csv.gz";
+    // const string &fname = "data/deribit_incremental_book_L2_2019-07-01_BTC-PERPETUAL.csv.gz";
+    const string &fname = "data/l2_mine.csv.gz";
     std::ifstream ifile(fname, std::ios_base::in | std::ios_base::binary);
     if (!ifile) {
         std::cerr << "Failed to open the file." << std::endl;

@@ -1,11 +1,11 @@
-Cubist Test
+Backtester
 ===========
 
 The solution is written in C++17. It uses cmake. For the python file only pandas needs to be installed.
 
 The project contains the following components:
 
-A Backtester, L3OrderBook, sample strategy and a primitive analysis tool.
+A Backtester, L3OrderBook, sample strategy and an analysis tool.
 
 The backtester processes market-data events and maintains 2 ring buffers from and to the strategy 
 containing messages in transit.

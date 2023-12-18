@@ -28,7 +28,7 @@ const basic_istream<char> &getL(SPSC<T, C> &spsc, istream &instream) {
 
 int main(int argc, char *argv[]) {
     if (argc != 4) {
-        std::cerr << "Usage: [./cubist [exchange-strat-latency] [strategy-exchange-latency] [input-file]]"
+        std::cerr << "Usage: [./backtester [exchange-strat-latency] [strategy-exchange-latency] [input-file]]"
                   << std::endl;
         exit(1);
     }

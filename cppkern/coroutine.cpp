@@ -4,6 +4,9 @@
 
 #include "coroutine.h"
 #include <stdio.h>
+#include <chrono>
+#include <cassert>
+
 #ifdef USEJMP
 #include <setjmp.h>
 #endif
@@ -115,7 +118,7 @@ struct Strategy {
         do {
             io.recv();
             en = std::chrono::system_clock::now();
-            GET_PC(1) += elapsed(st, en);
+            // GET_PC(1) += elapsed(st, en);
             preparedData++;
         } while (true);
     }
@@ -123,13 +126,13 @@ struct Strategy {
 
 void interruptHandler(u64 ioAddr) {
     en = std::chrono::system_clock::now(); \
-    GET_PC(0) += elapsed(st, en);
+    // GET_PC(0) += elapsed(st, en);
     auto io = reinterpret_cast<IO *>(ioAddr);
     int i = 0;
     while (i < LIMIT) {
         io->interrupt(i);
         en = std::chrono::system_clock::now(); \
-        GET_PC(0) += elapsed(st, en);
+        // GET_PC(0) += elapsed(st, en);
         ++i;
     }
 }
@@ -140,8 +143,8 @@ void strategytrampoline(u64 stratAddr) {
 }
 
 void epilogue() {
-    printf("block->interrupt [%f ns]\n", GET_PC(0) * 1'000'000'000.0 / LIMIT);
-    printf("interrupt->block [%f ns]\n", GET_PC(1) * 1'000'000'000.0 / LIMIT);
+    // printf("block->interrupt [%f ns]\n", GET_PC(0) * 1'000'000'000.0 / LIMIT);
+    // printf("interrupt->block [%f ns]\n", GET_PC(1) * 1'000'000'000.0 / LIMIT);
 
     printf("Main: Program completed\n");
 }
@@ -151,11 +154,6 @@ int main() {
     IO io;
     Strategy strategy{io};
 
-    getcontext_(&epilogueCtx);
-    epilogueCtx.uc_link = 0;
-    epilogueCtx.uc_stack.ss_sp = epilogueStack;
-    epilogueCtx.uc_stack.ss_size = sizeof(epilogueStack);
-    makecontext_(&epilogueCtx, epilogue, 0);
 
     u64 strategyAddr = reinterpret_cast<u64>(&strategy);
     void (*bFunc)() = reinterpret_cast<void (*)()>(strategytrampoline);
@@ -169,7 +167,7 @@ int main() {
     u64 ioAddr = reinterpret_cast<u64>(&io);
     void (*iFunc)() = reinterpret_cast<void (*)()>(interruptHandler);
     getcontext_(&mainCtx);
-    mainCtx.uc_link = &epilogueCtx;
+    mainCtx.uc_link = 0;
     mainCtx.uc_stack.ss_sp = mainStack;
     mainCtx.uc_stack.ss_size = sizeof(mainStack);
     makecontext_(&mainCtx, iFunc, 1, ioAddr);

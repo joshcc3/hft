@@ -4,10 +4,8 @@
 //#define NDEBUG
 
 
-#include <cstddef>
 #include <cassert>
-#include <memory>
-#include <cstdlib>
+#include <utility>
 
 template<typename T>
 struct Free {
@@ -20,10 +18,9 @@ template<typename T, std::size_t Capacity>
 class RingBuffer {
 public:
     static_assert(__builtin_popcount(Capacity) == 1);
-    RingBuffer() : data{static_cast<T *>(malloc(sizeof(T) * Capacity))}, head{0}, tail{0}, _size{0} {
-        if (data.get() == nullptr) {
-            throw std::bad_alloc();
-        }
+    RingBuffer() : head{0}, tail{0}, _size{0} {
+        data = static_cast<T *>(malloc(sizeof(T) * Capacity));
+        assert(data);
     }
 
     static_assert(Capacity > 0, "Capacity must be positive.");
@@ -72,11 +69,16 @@ public:
         --_size;
     }
 
+    ~RingBuffer() {
+        free(data);
+    }
+
 private:
-    std::unique_ptr<T[], Free<T>> data;
+    T* data;
     std::size_t head;
     std::size_t tail;
     std::size_t _size;
+
 
     [[nodiscard]] std::size_t next(std::size_t current) const noexcept {
         return (current + 1) % Capacity;

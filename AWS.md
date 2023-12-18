@@ -40,7 +40,7 @@ sudo ldconfig
 
 sudo cp  headers/bpf/* /usr/include/bpf/
 cp -r /usr/include/linux ../linux-headers.bk
-sudo cp headers/linux/* /usr/include/linux/
+sudo cp headers/linux/* /usr/include/linux/x
 sudo cp -r headers/xdp /usr/include/xdp
 
 cat /proc/sys/vm/nr_hugepages

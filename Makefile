@@ -1,7 +1,9 @@
-FLAGS       := -Wall
+FLAGS       := -Wall -mno-sse
 
-OBJECTS := test.o \
-            cpp_support.cpp.o
+igb-objs := lowlatencylab/client/containers.cpp.o \
+           	    lowlatencylab/client/CoroutineMngr.cpp.o lowlatencylab/client/L2OB.cpp.o lowlatencylab/client/launch.cpp.o \
+           	    lowlatencylab/client/mdmcclient.cpp.o lowlatencylab/client/Strat.cpp.o \
+           	    cppkern/ucontext_.s.o
 
 ccflags-y += $(FLAGS)
 
@@ -15,7 +17,8 @@ cxx-selected-flags = $(shell echo $(KBUILD_CFLAGS) \
             | sed s/-Wno-pointer-sign//g \
             | sed s/-Werror=incompatible-pointer-types//g \
             | sed s/-Werror=designated-init//g \
-            | sed s/-std=gnu90//g )
+            | sed s/-Wreorder//g \
+            | sed s/-std=gnu11//g )
 
 cxxflags = $(FLAGS) \
             $(cxx-selected-flags) \
@@ -25,18 +28,14 @@ cxxflags = $(FLAGS) \
             -fno-exceptions \
             -std=c++17
 
-# g++ -g -c  -fno-builtin -nostdlib -fno-rtti -fno-exceptions -std=c++17  lowlatencylab/client/mdmcclient.cpp lowlatencylab/client/L2OB.cpp lowlatencylab/client/Strat.cpp cppkern/containers.cpp lowlatencylab/client/CoroutineMngr.cpp lowlatencylab/client/launch.cpp
+HOSTCXX := g++
 
-cxx-prefix := " $(HOSTCXX) [M]  "
-
-
+cxx-prefix := " $(HOSTCXX) $(cxxflags) [M]  "
 
 %.cpp.o: %.cpp
-    @echo $(cxx-prefix)$@
-    @$(HOSTCXX) $(cxxflags) -c $< -o $@
-    @echo -n > $$(dirname $@)/.$$(basename $@).cmd
+	@echo $(cxx-prefix)$@
+	@$(HOSTCXX) $(cxxflags) -c $< -o $@
+	@echo -n > $$(dirname $@)/.$$(basename $@).cmd
 
-.PHONY: clean
-clean:
-    @echo clean
-    make -C M=$(KMOD_DIR) clean
+%.s.o: %.s
+	as -g $< -o $@

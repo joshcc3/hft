@@ -60,7 +60,7 @@ public:
     sockaddr_in serverAddr{};
 
     // we don't want to split our data across multiple buffers
-    static constexpr int BUFFER_SIZE = sizeof(Order) * ((1 << 9)/sizeof(Order));
+    static constexpr int BUFFER_SIZE = sizeof(Order) * ((1 << 9) / sizeof(Order));
     static constexpr int NUM_BUFFERS = 128;
     static constexpr int GROUP_ID = 1;
     std::unique_ptr<char[]> buffers;
@@ -162,7 +162,9 @@ public:
         assert(io_uring_sq_ready(&ioState.ring) == 1);
         int completedEvents = ioState.submitAndWait(1);
         assert(completedEvents == 1);
-        assert(io_uring_cq_ready(&ioState.ring) <= 1); {
+        assert(io_uring_cq_ready(&ioState.ring) <= 1);
+
+        {
             cqe_guard cg{ioState};
             receiveConn(cg.completion);
         }

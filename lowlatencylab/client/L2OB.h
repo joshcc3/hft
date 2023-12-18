@@ -5,9 +5,10 @@
 #ifndef TICTACTOE_L2OB_H
 #define TICTACTOE_L2OB_H
 
-#include <cassert>
-#include <unordered_set>
-#include "../defs.h"
+#include "defs.h"
+#include "../../cppkern/containers.h"
+
+using namespace josh;
 
 struct TopLevel {
     PriceL bestBid = 0;
@@ -30,7 +31,7 @@ struct TopLevel {
     }
 };
 
-struct LevelInfo {
+struct alignas(32) LevelInfo {
     TimeNs lastUpdated;
     PriceL price;
     Qty levelQty;
@@ -49,20 +50,19 @@ struct LevelInfo {
     }
 };
 
-using SideLevel = std::vector<LevelInfo>;
+constexpr static int MAX_SZ = 1 << 9;
+using SideLevel = array<LevelInfo, MAX_SZ>;
+//using SideLevel = vector<LevelInfo>;
 
 class L2OB {
 public:
     // debug
-    std::unordered_set<PriceL> seen;
 
     SideLevel bid;
     SideLevel ask;
     i64 spreadEWMA = 0;
 
-    L2OB() : bid{}, ask{}, seen{} {
-        bid.reserve(1 << 8);
-        ask.reserve(1 << 8);
+    L2OB() : bid{}, ask{} {
     }
 
     void clear() {
@@ -70,12 +70,10 @@ public:
         size_t askCap = ask.capacity();
         bid.clear();
         ask.clear();
-        seen.clear();
         assert(bid.capacity() == oldCap);
         assert(ask.capacity() == askCap);
     }
 
-    template<bool IsReal>
     TopLevel
     update(bool isSnapshot, Side side, TimeNs localTimestamp, PriceL price, Qty qty) {
         assert(qty > 0);
@@ -83,19 +81,19 @@ public:
         assert(localTimestamp > 0);
         TopLevel res;
         if (side == Side::BUY) {
-            res = update<IsReal, Side::BUY>(isSnapshot, bid, ask, localTimestamp, price, qty);
+            res = update<Side::BUY>(isSnapshot, bid, ask, localTimestamp, price, qty);
         } else if (side == Side::SELL) {
-            res = update<IsReal, Side::SELL>(isSnapshot, ask, bid, localTimestamp, price, qty);
+            res = update<Side::SELL>(isSnapshot, ask, bid, localTimestamp, price, qty);
         } else {
             assert(false);
         }
         return res;
     }
 
-    template<bool IsReal, Side side>
+    template<Side side>
     TopLevel
     update(bool isSnapshot, SideLevel& level, SideLevel& oppLevel, TimeNs localTimestamp, PriceL price, Qty qty) {
-        assert(oppLevel.empty() || isSnapshot || side == Side::BUY == price <= oppLevel[0].price);
+        assert(oppLevel.empty() || isSnapshot || ((side == Side::BUY) == (price <= oppLevel[0].price)));
         auto sideComp = [price](const LevelInfo& l) {
             if constexpr (side == Side::BUY) {
                 return price >= l.price;
@@ -103,41 +101,39 @@ public:
                 return price <= l.price;
             }
         };
-
         TopLevel topLevel;
-
-
-        auto iter = std::find_if(level.rbegin(), level.rend(), sideComp);
-        assert(iter == level.rend() || sideComp(*iter) && iter->lastUpdated <= localTimestamp);
-        assert(iter != level.rend() || level.empty() ||
-            (!sideComp(*(iter - 1)) || (iter - 1)->price == price) && (iter - 1)->lastUpdated <= localTimestamp);
-
-        if (IsReal) {
-            const bool isTopLevelUpdate = iter != level.rbegin();
-
-            if (iter != level.rend() && iter->price == price) {
-                assert(seen.find(price) != seen.end());
-                assert(qty != iter->levelQty);
-                iter->update(localTimestamp, qty);
-            } else {
-                // TODO we currently dont treat atomic updates properly which means the book gets into a crossed state sometimes.
-                assert(seen.find(price) == seen.end() ||
-                    !oppLevel.empty() && (!sideComp(*oppLevel.rbegin()) || oppLevel.rbegin()->price == price) || std::abs(oppLevel.rbegin()->price - price) < 10 * PRECISION_L);
-                seen.insert(price);
-                level.insert(iter.base(), LevelInfo{localTimestamp, price, qty});
-            }
-
-            if (!bid.empty() && !ask.empty() && isTopLevelUpdate) {
-                topLevel.set(bid.back().price, ask.back().price, bid.back().levelQty, ask.back().levelQty);
-                spreadEWMA = spreadEWMA/2 + (topLevel.bestAsk - topLevel.bestBid) / 2;
-            }
-
-            assert(verifyLevel<side>(level, localTimestamp, price, qty));
-
-            assert(stateChecks());
-            assert(bid.empty() || ask.empty() || !isTopLevelUpdate || topLevel.bestBid == bid.back().price && topLevel.bestAsk == ask.back().price);
-            assert(!bid.empty() && !ask.empty() && isTopLevelUpdate || topLevel.bidSize == -1 && topLevel.askSize == -1);
+        if (!bid.empty() && !ask.empty()) {
+            topLevel.set(bid.back().price, ask.back().price, bid.back().levelQty, ask.back().levelQty);
         }
+
+        auto iter = find_if(level.rbegin(), level.rend(), sideComp);
+        assert(iter == level.rend() || (sideComp(*iter) && iter->lastUpdated <= localTimestamp));
+//        assert(iter != level.rend() || level.empty() ||
+  //          (!sideComp(*(iter - 1)) || (((iter - 1)->price == price) && ((iter - 1)->lastUpdated <= localTimestamp)));
+
+        if (iter != level.rbegin()) {
+            topLevel.bidSize = -1;
+            topLevel.askSize = -1;
+        }
+
+        const bool isTopLevelUpdate = iter == level.rbegin();
+
+        if (iter != level.rend() && iter->price == price) {
+            // assert(qty != iter->levelQty);
+            iter->update(localTimestamp, qty);
+        } else {
+            // TODO we currently dont treat atomic updates properly which means the book gets into a crossed state sometimes.
+            level.insert(iter.base(), localTimestamp, price, qty);
+        }
+
+        if (!bid.empty() && !ask.empty() && isTopLevelUpdate) {
+            spreadEWMA = spreadEWMA / 2 + (topLevel.bestAsk - topLevel.bestBid) / 2;
+        }
+
+        assert(verifyLevel<side>(level, localTimestamp, price, qty));
+
+        assert(stateChecks());
+        assert((!bid.empty() && !ask.empty() && isTopLevelUpdate) || (topLevel.bidSize == -1 && topLevel.askSize == -1));
         return topLevel;
     }
 
@@ -151,7 +147,7 @@ public:
             }
         };
 
-        auto it = std::find_if(level.begin(), level.end(), [price](const LevelInfo& l) { return l.price == price; });
+        auto it = find_if(level.begin(), level.end(), [price](const LevelInfo& l) { return l.price == price; });
         assert(it->price == price && it->levelQty == qty && it->lastUpdated == localTimestamp);
         assert(it == level.begin() || sideComp(*(it - 1)));
         assert(it == level.end() - 1 || !sideComp(*(it + 1)));
@@ -171,18 +167,11 @@ public:
         assert(t > 0);
         assert(side == Side::BUY || side == Side::SELL);
         SideLevel& level = side == Side::BUY ? bid : ask;
-        SideLevel& oppLevel = side == Side::BUY ? ask : bid;
-        auto it = std::find_if(level.rbegin(), level.rend(),
-                               [priceL](const LevelInfo& l) { return l.price == priceL; });
+        auto it = find_if(level.rbegin(), level.rend(),
+                          [priceL](const LevelInfo& l) { return l.price == priceL; });
         assert(it != level.rend());
-        assert(seen.find(priceL) != seen.end());
         assert((it.base() - 1)->price == priceL);
         level.erase(it.base() - 1);
-
-        if(!oppLevel.empty() && (oppLevel.end() - 1)->price != priceL) {
-            seen.erase(priceL);
-            assert(seen.find(priceL) == seen.end());
-        }
 
         assert(stateChecks());
     }
@@ -193,27 +182,20 @@ public:
     }
 
     bool stateChecks() {
-        assert(bid.size() + ask.size() == seen.size() || bid.size() > 0 && ask.size() > 0 && isCrossed());
         if (!bid.empty() && !ask.empty()) {
             auto it = bid.begin();
             while (it + 1 != bid.end()) {
                 assert(it->price < (it + 1)->price);
                 ++it;
             }
-            it = ask.begin();
-            while (it + 1 != ask.end()) {
-                assert(it->price > (it + 1)->price);
-                ++it;
+            auto askIt = ask.begin();
+            while (askIt + 1 != ask.end()) {
+                assert(askIt->price > (askIt + 1)->price);
+                ++askIt;
             }
             assert(spreadEWMA >= 0);
             assert((ask.end() - 1)->price - (bid.end() - 1)->price >= -20 * PRECISION_L);
         }
-        std::unordered_set<PriceL> other;
-        std::transform(bid.begin(), bid.end(), std::inserter(other, other.begin()),
-                       [](const LevelInfo& l) { return l.price; });
-        std::transform(ask.begin(), ask.end(), std::inserter(other, other.begin()),
-                       [](const LevelInfo& l) { return l.price; });
-        assert(other == seen);
 
         return true;
     }

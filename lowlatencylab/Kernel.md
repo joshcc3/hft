@@ -1,5 +1,8 @@
 Notes on the linux kernel
 
+Extensions: Hack the pcie infrastructure of the kernel itself.
+Fun idea: use the gpio pins to generate an interrupt when the nic detects a the ethernet preamble.
+
 Good book on linux kernel
 https://0xax.gitbooks.io/linux-insides/content/SyncPrim/linux-sync-2.html
 
@@ -168,7 +171,9 @@ netns exec ns1 bash -c  "bpftool prog pin name strat /home/joshuacoutinho/CLionP
 netns exec ns1 bash -c  "bpftool net detach xdpdrv dev veth1 && bpftool prog load /home/joshuacoutinho/CLionProjects/hft/lowlatencylab/client/bpf/strat.bpf.o /sys/fs/bpf/strat && bpftool net attach xdpdrv name strat dev veth1 && /home/joshuacoutinho/CLionProjects/hft/cmake-build-debug/lll_strategy
 netns exec ns1 bash -c  "bpftool net detach xdpdrv dev veth1 && bpftool prog load /home/joshuacoutinho/CLionProjects/hft/lowlatencylab/client/bpf/strat.bpf.o /sys/fs/bpf/strat && bpftool net attach xdpdrv name strat dev veth1 && /home/joshuacoutinho/CLionProjects/hft/cmake-build-debug/lll_strategy
 
-netns exec ns2 /home/joshuacoutinho/CLionProjects/hft/cmake-build-debug/lll_exchange
+ip netns exec ns2 /home/joshuacoutinho/CLionProjects/hft/cmake-build-debug/lll_exchange
+
+ip netns exec ns1 bash -c  "bpftool net detach xdpdrv dev veth1 && bpftool prog load /home/joshuacoutinho/CLionProjects/hft/lowlatencylab/client/bpf/strat.bpf.o /sys/fs/bpf/strat && bpftool net attach xdpdrv name strat dev veth1 && /home/joshuacoutinho/CLionProjects/hft/cmake-build-debug/lll_strategy
 
 Nice guide on kernel debugging:
 https://blog.cloudflare.com/a-story-about-af-xdp-network-namespaces-and-a-cookie/
@@ -185,7 +190,8 @@ https://lwn.net/Articles/914992/
 
 KERNEL_VERSION=6.7.0-rc3-00288-g441546c15745-dirty;ROOTFS=/home/joshuacoutinho/CLionProjects/qemu-8.1.3/isos/igb-patch.qcow2; sudo qemu -nbd --connect=/dev/nbd1 $ROOTFS  && sudo mount /dev/nbd1p1 /mnt/igb-vm/ && sudo cp -r /lib/modules/$KERNEL_VERSION/ /mnt/igb-vm/lib/modules/ && sudo umount /mnt/igb-vm  && sudo qemu-nbd --disconnect /dev/nbd1
 
-KERNEL_VERSION=6.7.0-rc3-00288-g441546c15745-dirty;ROOTFS=/home/joshuacoutinho/CLionProjects/qemu-8.1.3/isos/igb-patch.qcow2; make -j12 && sudo make modules_install && sudo make install && sudo qemu-nbd --connect=/dev/nbd1 $ROOTFS  && sudo mount /dev/nbd1p1 /mnt/igb-vm/ && sudo cp -r /lib/modules/$KERNEL_VERSION/ /mnt/igb-vm/lib/modules/ && sudo umount /mnt/igb-vm  && sudo qemu-nbd --disconnect /dev/nbd1 && gdb -ex "target remote :1234" -ex "c" vmlinux
+sudo modprobe nbd max_part=8
+KERNEL_VERSION=6.7.0-rc3-00292-gf878ded19be6-dirty;ROOTFS=/home/joshuacoutinho/CLionProjects/qemu-8.1.3/isos/igb-patch.qcow2; make -j12 && sudo make modules_install && sudo make install && sudo qemu-nbd --connect=/dev/nbd1 $ROOTFS  && sudo mount /dev/nbd1p1 /mnt/igb-vm/ && sudo cp -r /lib/modules/$KERNEL_VERSION/ /mnt/igb-vm/lib/modules/ && sudo umount /mnt/igb-vm  && sudo qemu-nbd --disconnect /dev/nbd1 && gdb -ex "target remote :1234" -ex "c" vmlinux
 
 
 How to Determine the Exact Location of the Crash
@@ -220,7 +226,7 @@ You can easily compile the kernel with debug symbols by enabling CONFIG_DEBUG_IN
 In order to get the symbols loaded for a dynamically loaded module, use lx-symbols. This will load the symbols for the module igb, you can then set a hardware breakpoint at the corresponding location.
 
 
-sudo qemu-system-x86_64 -s -S    -m 2048 -cpu host --enable-kvm -kernel /boot/vmlinuz-6.7.0-rc3-00288-g441546c15745-dirty -initrd /boot/initramfs-6.7.0-rc3-00288-g441546c15745-dirty.img -hda CLionProjects/qemu-8.1.3/isos/igb-patch.qcow2  -netdev tap,id=net0,ifname=tap0,script=no,downscript=no -device igb,netdev=net0,id=nic0  -nographic -append "root=/dev/sda1 rw nokaslr console=ttyS0 init=/lib/systemd/systemd"
+sudo qemu-system-x86_64 -s -S    -m 2048 -cpu host --enable-kvm -kernel /boot/vmlinuz-6.7.0-rc3-00292-gf878ded19be6-dirty -initrd /boot/initramfs-6.7.0-rc3-00292-gf878ded19be6-dirty.img -hda CLionProjects/qemu-8.1.3/isos/igb-patch.qcow2  -netdev tap,id=net0,ifname=tap0,script=no,downscript=no -device igb,netdev=net0,id=nic0  -nographic -append "root=/dev/sda1 rw nokaslr console=ttyS0 init=/lib/systemd/systemd"
 
 
 git submodule add https://github.com/username/submodule-repo.git external/submodule-repo
@@ -241,3 +247,13 @@ No. 1, how do I represent the continuation?
 - I think the c++ coroutines api is the correct way to do this however I do not have access to the c++ stdlib so I shall have to implement it myself
 
 The problem is that alot of the recv calls are in function calls that are called from many different places. 
+
+
+sudo sysctl -w net.ipv6.conf.eth0.disable_ipv6=1
+
+
+----
+
+why does it crash when we set our processed field?
+open questions: why does it not accept packets before we have assigned an ip address?
+why does it keep losing its ip address?

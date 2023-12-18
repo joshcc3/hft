@@ -31,10 +31,10 @@ start_context_:
 	movq	%rax,%rdi
 2:
 
-	call	exit
 	/* The 'exit' call should never return.  In case it does cause
 	   the process to terminate.  */
 	hlt
+.size start_context_, .-start_context_
 
 
 .globl setcontext_;
@@ -66,6 +66,7 @@ setcontext_:
 	/* Clear rax to indicate success.  */
 	xorl	%eax, %eax
 	ret
+.size setcontext_, .-setcontext_
 
 
 
@@ -95,6 +96,9 @@ getcontext_:
 
 	xorl	%eax, %eax
 	ret
+.size getcontext_, .-getcontext_
+
+
 
 .globl swapcontext_;
 .type swapcontext_,@function;
@@ -142,3 +146,4 @@ swapcontext_:
 	/* Clear rax to indicate success.  */
 	xorl	%eax, %eax
 	ret
+.size swapcontext_, .-swapcontext_

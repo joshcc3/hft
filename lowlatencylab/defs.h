@@ -20,7 +20,6 @@
 #include <cstddef>
 #include <liburing.h>
 #include <chrono>
-#include <cassert>
 #include <iostream>
 #include <unordered_map>
 #include <linux/if_ether.h>
@@ -42,7 +41,7 @@ inline double timeSpent[10] = {0, 0, 0, 0, 0};
 
 template<typename T>
 inline double elapsed(T t1, T t2) {
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count() / 1000'000'000.0;
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count() / 1000000000.0;
 }
 
 #define CLOCK(c, a) { \
@@ -346,7 +345,7 @@ struct IOUringState {
 
     io_uring_cqe* popCqe() {
         io_uring_cqe* cqe;
-        // TODO: I get interrupts here - un sure why
+        // TODO: I get interrupts here - un sure why - seems to be during gdb. I think it sends a SIGINT
         int res = io_uring_wait_cqe(&ring, &cqe);
         assert(res == 0);
         u64 tag = io_uring_cqe_get_data64(cqe);
@@ -615,50 +614,6 @@ static inline u16 tcpudp_csum(u32 saddr, u32 daddr, u32 len,
 
     return csum_tcpudp_magic(saddr, daddr, len, proto, csum);
 }
-
-
-struct RecvRes {
-    u32 available;
-    u32 reserved;
-    u32 idx;
-    u32 fillQIdx;
-};
-
-/*
- *
- *
-Model for these continuations
-{-# LANGUAGE ExistentialQuantification #-}
-
-
-data Cont r a = Cont { getExecution :: ((a -> r) ->r) }
-
-(>>==) :: Cont r a -> (a -> Cont r b) -> Cont r b
-(>>==) (Cont ca) f = Cont cb
-  where
-    cb bcont = ca wrappedCont
-        where
-            wrappedCont a = cb bcont
-              where
-                Cont cb = f a
-
-c1 :: Cont Int Int
-c1 = Cont { getExecution = h }
-    where
-        h :: (Int -> Int) -> Int
-        h f = g 10
-            where
-                g :: Int -> Int
-                g x = let a = f x in if a == 0 then 231 else g a
-
-f :: Int -> Cont Int Int
-f x = Cont $ \c -> c (x - 1)
-
-main = print (getExecution (c1 >>== f) (\a -> a))
- *
- *
- */
-
 
 
 #endif //TICTACTOE_DEFS_H
