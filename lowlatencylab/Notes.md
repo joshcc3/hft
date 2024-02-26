@@ -189,3 +189,5 @@ sudo bpftrace -e 'kprobe:ip_rcv / comm != "DefaultDispatch" && comm != ".NET Thr
 to get the packet type
 
 ethtool -S <interface name>, ip -s link
+
+

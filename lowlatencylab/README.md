@@ -1,4 +1,4 @@
-Mkonjibhu123!
+
 
 Goal is to setup a testbench to test optimizations to sending and receiving packets through the linux kernel.
 Problem statement:
@@ -142,7 +142,7 @@ Interface Support:
 Not all interfaces support multicast traffic equally. For example, the lo (loopback) interface can be used for multicast, but only for traffic originating from the same machine. In contrast, your wireless interface wlp0s20f3 might be the one that actually connects to the network where multicast packets are being distributed.
 
 Firewall Rules:
-Some systems have firewall rules that affect how multicast traffic is received. These rules might be set up to allow such traffic only on certain interfaces.
+Some systems have firewall rules that affeact how multicast traffic is received. These rules might be set up to allow such traffic only on certain interfaces.
 
 Scope of Multicast Address:
 The multicast address used also has a scope. For example, the 239.255.0.1 is in the Organization-Local Scope (addresses from 239.255.0.0 to 239.255.255.255), which means it's meant to be used within the same organization or site, and routers generally do not forward these packets beyond their local subnets.
