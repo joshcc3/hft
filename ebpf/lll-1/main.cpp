@@ -61,9 +61,11 @@ struct PacketIn {
     struct ethhdr eth;
     struct iphdr ip;
     struct udphdr udp;
-    u8 packetType;
-    char _padding[5];
-    struct market_data md;
+    u64 internal_sequence;
+    u32 length;
+    u16 type;
+//    char _padding[5];
+//    struct order_data od;
 } __attribute__ ((packed));
 
 struct order_data {
@@ -245,11 +247,11 @@ public:
     xdp_program* program;
 
     XDPProgram() {
-        // program = xdp_program__from_pin("/sys/fs/bpf/lll_1");
-        // if (nullptr == program) {
-            // cerr << "Failed to get program" << endl;
-            // exit(EXIT_FAILURE);
-        // }
+         program = xdp_program__from_pin("/sys/fs/bpf/lll_1");
+         if (nullptr == program) {
+             cerr << "Failed to get program" << endl;
+             exit(EXIT_FAILURE);
+         }
     }
 };
 
@@ -279,7 +281,7 @@ public:
             .bind_flags = socketCfg.bindFlags
         };
 
-        int ret = xsk_socket__create(&xsk, "wlp0s20f3", QUEUE_NUM, umem.umem, nullptr, &tx, &cfg);
+        int ret = xsk_socket__create(&xsk, "lo", QUEUE_NUM, umem.umem, nullptr, &tx, &cfg);
         if (ret != 0) {
             cerr << "Errno: " << -ret << endl;
             exit(EXIT_FAILURE);
@@ -319,13 +321,13 @@ public:
             perror("No busy poll");
             exit(EXIT_FAILURE);
         }
-
+        /*
         sock_opt = 1000;
         if (setsockopt(xskFD, SOL_SOCKET, SO_BUSY_POLL_BUDGET,
                        (void *) &sock_opt, sizeof(sock_opt)) < 0) {
             perror("No busy poll");
             exit(EXIT_FAILURE);
-        }
+        }*/
 
         cout << "XSK init completed." << endl;
     }
@@ -564,6 +566,8 @@ public:
     explicit OB(Sender& s): s{s} {}
 
     void update(const xdp_desc* readDesc, const PacketIn& packet) {
+        cout << "PacketType [seq: " << packet.internal_sequence << ", typ: " << packet.type << "].\n";
+        /*
         market_data p = packet.md;
         if (p.side == 'b') {
             if (p.qty == 0) {
@@ -588,6 +592,7 @@ public:
         } else {
             assert(false);
         }
+         */
     }
 };
 
@@ -596,10 +601,10 @@ class Receiver {
 public:
     XDPManager& xdp;
     OB& ob;
-    Sender& s;
+//    Sender& s;
     constexpr static u32 batchSize = 64;
 
-    Receiver(XDPManager& xdp, OB& ob, Sender& s): xdp{xdp}, ob{ob}, s{s} {
+    Receiver(XDPManager& xdp, OB& ob /*, Sender& s*/): xdp{xdp}, ob{ob} { // , s{s} {
     }
 
     void recv() const {
@@ -610,24 +615,24 @@ public:
         assert(entries > 0);
         assert(idxRx < XSK_RING_CONS__DEFAULT_NUM_DESCS);
 
-        u32 idxFillQ = 0;
+        /*u32 idxFillQ = 0;
         u32 ret = xsk_ring_prod__reserve(&xdp.umem.fillQ, entries, &idxFillQ);
         while (ret != entries) {
             ret = xsk_ring_prod__reserve(&xdp.umem.fillQ, entries, &idxFillQ);
-        }
-        cout << "Received [" << entries << "]." << endl;
+        }*/
+        cout << "Received [" << entries << "].\n";
         for (int i = 0; i < entries; ++i) {
             const xdp_desc* desc = xsk_ring_cons__rx_desc(&xdp.xsk.rx, idxRx++);
             const u64 addrOffset = desc->addr;
             const u32 len = desc->len;
             assert(addrOffset == xsk_umem__extract_addr(addrOffset));
-            assert(len == sizeof(PacketIn));
+            //assert(len == sizeof(PacketIn));
 
             assert(xdp.umem.umemArea + addrOffset == xsk_umem__get_data(xdp.umem.umemArea, addrOffset));
             u8* packetData = static_cast<u8 *>(xsk_umem__get_data(xdp.umem.umemArea, addrOffset));
             assert((reinterpret_cast<u64>(packetData) & 127) == 0);
             const PacketIn* packet = reinterpret_cast<PacketIn *>(packetData);
-            hex_dump(packetData, sizeof(PacketIn), desc->addr);
+            // hex_dump(packetData, sizeof(PacketIn), desc->addr);
 
             assert(packet->eth.h_proto == htons(ETH_P_IP));
             assert(packet->ip.version == 4);
@@ -637,16 +642,16 @@ public:
             assert(((packet->ip.frag_off >> 13) & 1) == 0);
             assert(((packet->ip.frag_off >> 15) & 1) == 0);
             assert(htons(packet->udp.len) == htons(packet->ip.tot_len) - sizeof(iphdr));
-            assert(packet->packetType == PACKET_TYPE_MD);
+//            assert(packet->type == PACKET_TYPE_MD);
             ob.update(desc, *packet);
-            if (!s.packetBuffered) {
+            /*if (!s.packetBuffered) {
                 *xsk_ring_prod__fill_addr(&xdp.umem.fillQ, idxFillQ++) = addrOffset;
-            }
+            }*/
         }
-        if (!s.trigger()) {
+        /*if (!s.trigger()) {
             // TODO - update the fill q on a sender complete to indicate can be used for receiving
             xsk_ring_prod__submit(&xdp.umem.fillQ, entries);
-        }
+        }*/
         xsk_ring_cons__release(&xdp.xsk.rx, entries);
         xdp.xsk.ring_stats.rx_frags += entries;
     }
@@ -657,21 +662,21 @@ public:
     // TODO - verify that these flags actually work.
     XDPConfig cfg{
         .bindFlags = XDP_COPY & (~XDP_USE_NEED_WAKEUP),
-        .xdpMode = XDP_FLAGS_SKB_MODE, // XDP_FLAGS_DRV_MODE,
+        .xdpMode =  XDP_FLAGS_DRV_MODE, // XDP_FLAGS_SKB_MODE,
         .libxdpFlags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD,
     };
     XDPManager xdp{cfg};
 
-    Sender s{xdp};
+//    Sender s{xdp};
     OB ob(s);
-    Receiver r(xdp, ob, s);
+    Receiver r(xdp, ob); // , s);
 
-    //while (true) {
-        // r.recv();
-        s.prepareIndependentPacket(256);
-        s.trigger();
-        usleep(100000);
-        s.complete();
-        usleep(100000000);
-    //}
+    while (true) {
+        r.recv();
+        //s.prepareIndependentPacket(256);
+        //s.trigger();
+        //usleep(100000);
+        //s.complete();
+        //usleep(100000000);
+    }
 }
