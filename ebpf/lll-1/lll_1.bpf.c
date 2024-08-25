@@ -24,7 +24,7 @@ struct {
 	__uint(max_entries, 1);
 	__uint(key_size, sizeof(int));
 	__uint(value_size, sizeof(int));
-} xsks_map SEC(".maps");
+} mdRedirMap SEC(".maps");
 
 
 typedef __u8 u8;
@@ -76,16 +76,16 @@ int lll_1(struct xdp_md *ctx)
       return XDP_PASS;
     }
 
-      if (p->ip.daddr != INADDR_B(10, 50, 15, 47)) {
+      /*if (p->ip.daddr != INADDR_B(10, 50, 15, 47)) {
           bpf_printk("Host: %d, host ip %x", counter++, p->ip.daddr);
           return XDP_PASS;
-      }
+      }*/
 
       // Check destination port
       u16 dest_port = ntohs(p->udp.dest);
       if (dest_port < 10000 || dest_port > 10300) {
-          bpf_printk("Port: %d, port %d", counter++, dest_port);
-          return XDP_PASS;
+          bpf_printk("Counter: %d, port %d, type %d", counter++, dest_port, p->type);
+          return bpf_redirect_map(&mdRedirMap, 0, XDP_PASS);
       }
 
     bpf_printk("Packet: %d, type %d", counter++, p->type);

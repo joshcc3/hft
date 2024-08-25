@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.26)
+cmake_minimum_required(VERSION 3.21)
 project(cubist)
 project(obtester)
 project(tictactoe)
@@ -7,7 +7,7 @@ project(lll_exchange)
 project(xdp_test)
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(Boost 1.78.0 COMPONENTS iostreams REQUIRED)
+#find_package(Boost 1.78.0 COMPONENTS iostreams REQUIRED)
 
 add_executable(lll_exchange
         lowlatencylab/server/exchmcserver.cpp
